@@ -35,4 +35,4 @@ sudo ldconfig
 echo "=== Done ==="
 
 echo "Check cache mode with:"
-echo "  cefstatus"
+echo "  sudo cefnetdstart & cefstatus"
