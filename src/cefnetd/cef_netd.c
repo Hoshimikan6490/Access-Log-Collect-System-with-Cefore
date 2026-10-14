@@ -1008,10 +1008,14 @@ cefnetd_handle_create (
 	cef_log_write (CefC_Log_Info, "Loading cefnetd.conf ... OK\n");
 
 	/* Initialize sha256 validation environment for ccninfo */
-	if (hdl->ccninfo_valid_type == CefC_T_RSA_SHA256) {
-		res = cef_valid_init_ccninfoRT (conf_path);
-		if (res < 0) {
+	if (Cef_Is_Pkey_Type(hdl->ccninfo_valid_type)) {
+		res = cef_valid_init_ccninfoRT (conf_path, &hdl->ccninfo_valid_type);
+		if (res != 1) {
+			cef_log_write (CefC_Log_Error, "Failed to read the Encryption key file.\n");
 			return (NULL);
+		}
+		if (strcasecmp(hdl->ccninfo_valid_alg, CefC_ValidTypeStr_RSA256) == 0) {
+			hdl->ccninfo_valid_type = (uint16_t) cef_valid_type_get_forccninfo(hdl->ccninfo_valid_alg);
 		}
 	}
 	/* Clear information used in authentication & authorization */
@@ -1500,6 +1504,8 @@ cefnetd_handle_destroy (
 		cef_client_babel_sock_name_get (sock_path);
 		unlink (sock_path);
 	}
+
+	cef_valid_validkey_table_destroy();
 
 	if ( hdl->app_rsp_msg )
 		free(hdl->app_rsp_msg);
@@ -2246,6 +2252,10 @@ cefnetd_input_app_reg_command (
 		sprintf (cnd_dbg_msg, "Unreg(PIT) the application name filter [");
 	} else if (poh->app_reg_f == CefC_T_OPT_DEV_REG_PIT){
 		sprintf (cnd_dbg_msg, "Reg(PIT) the develop name filter [");
+	} else if (poh->app_reg_f == CefC_T_OPT_ROUTE_ADD){
+		sprintf (cnd_dbg_msg, "RouteAdd the application name filter [");
+	} else if (poh->app_reg_f == CefC_T_OPT_ROUTE_DEL){
+		sprintf (cnd_dbg_msg, "RouteDel the application name filter [");
 	} else {
 		sprintf (cnd_dbg_msg, "Unknown the application name filter [");
 	}
@@ -2279,7 +2289,7 @@ cefnetd_input_app_reg_command (
 
 	if (poh->app_reg_f == CefC_T_OPT_ROUTE_ADD) {
 		int res = cefnetd_fib_route_add (hdl->fib, faceid, CefC_Fib_Entry_Dynamic, NULL,
-					pm->name_len, pm->name, 0, NULL);
+					pm->name_len, pm->name, NULL);
 		if ( res == 1 ){
 			cefnetd_xroute_change_report (hdl, pm->name, pm->name_len, 1);
 		} else {
@@ -2292,7 +2302,7 @@ cefnetd_input_app_reg_command (
 		}
 	} else if (poh->app_reg_f == CefC_T_OPT_ROUTE_DEL) {
 		int res = cefnetd_fib_route_del (hdl->fib, faceid, CefC_Fib_Entry_Dynamic,
-					pm->name_len, pm->name, 0, NULL);
+					pm->name_len, pm->name, NULL);
 		if ( 0 <= res ){
 			cefnetd_xroute_change_report (hdl, pm->name, pm->name_len, 0);
 		} else {
@@ -2432,6 +2442,15 @@ cefnetd_xroute_change_report (
 		return;
 	}
 
+#ifdef CefC_Debug
+	cef_frame_conversion_name_to_uri (name, name_len, (char *)buff);
+	cef_dbg_write (CefC_Dbg_Finer, "%s, reg_f=%d\n", buff, reg_f);
+#endif // CefC_Debug
+
+	if (cef_frame_is_rootname(name, name_len)) {
+		return;
+	}
+
 	buff[0] = 0x03;
 	length = sizeof (uint16_t) + name_len + 1;
 	memcpy (&buff[1], &length, sizeof (uint16_t));
@@ -2525,6 +2544,10 @@ cefnetd_babel_process (
 	prefix_len   = tlv_hdr->length;
 	prefix_index = index + sizeof (struct tlv_hdr);
 	index += sizeof (struct tlv_hdr) + prefix_len;
+
+	if (cef_frame_is_rootname(&msg[prefix_index], prefix_len)) {
+		return (0);
+	}
 
 	/* Obtains the nexthop			*/
 	tlv_hdr = (struct tlv_hdr*) &msg[index];
@@ -2762,6 +2785,195 @@ cef_dbg_write (CefC_Dbg_Fine, "Illegal message (cefbabel)\n");
 			break;
 		}
 		}
+	} else if (memcmp(&msg[CefC_Ctrl_Len], CefC_Ctrl_ValidKey, CefC_Ctrl_ValidKey_Len) == 0) {
+		uint8_t op;
+		uint8_t validkey_type;
+		uint16_t hash_type;
+		uint16_t key_length;
+		uint16_t target_len;
+		char *resmsg = (char *)(*rspp);
+		const unsigned char* target;
+
+		res = 0;
+		index = CefC_Ctrl_Len + CefC_Ctrl_ValidKey_Len;
+		/* user check */
+		if ((memcmp(&msg[index], root_user_name, CefC_Ctrl_User_Len) != 0) &&
+			(memcmp(&msg[index], hdl->launched_user_name, CefC_Ctrl_User_Len) != 0)) {
+			sprintf(resmsg, "Permission denied (validkey)\n");
+			return strlen(resmsg);
+		}
+
+		index += CefC_Ctrl_User_Len;
+
+		/* operation (ADD / DEL / SHOW) */
+		op = msg[index];
+		index++;
+
+		/* command processing branch */
+		switch (op) {
+
+		case CefC_ValidKey_OPE_ADD:
+
+			/* key type (pubkey / keyid) */
+			validkey_type = msg[index];
+			index++;
+
+			/* hash type */
+			memcpy(&hash_type, &msg[index], sizeof(uint16_t));
+			index += sizeof(uint16_t);
+
+			/* key length */
+			memcpy(&key_length, &msg[index], sizeof(uint16_t));
+			index += sizeof(uint16_t);
+
+			/* target length */
+			memcpy(&target_len, &msg[index], sizeof(uint16_t));
+			index += sizeof(uint16_t);
+
+			if (index + target_len > msg_size) {
+				sprintf(resmsg, "invalid message size\n");
+				return strlen(resmsg);
+			}
+
+			if (validkey_type == CefC_ValidKey_CMD_TYPE_PUBKEY) {
+				char pubkey_path[PATH_MAX];
+
+				if (target_len >= PATH_MAX) {
+					sprintf(resmsg, "pubkey path too long\n");
+					return strlen(resmsg);
+				}
+
+				memcpy(pubkey_path, &msg[index], target_len);
+				pubkey_path[target_len] = '\0';
+				res = cef_valid_validkey_add(pubkey_path, NULL, key_length, hash_type);
+
+			} else if (validkey_type == CefC_ValidKey_CMD_TYPE_KEYID) {
+				if (target_len != key_length * 2) {
+					sprintf(resmsg, "invalid keyid length\n");
+					return strlen(resmsg);
+				}
+
+				target = &msg[index];
+				res = cef_valid_validkey_add(NULL, target, key_length, hash_type);
+			} else {
+				cef_log_write(CefC_Log_Error, "Failed to add validkey: cefvalidkey add type (%u) was specified.\n", validkey_type);
+				return (-1);
+			}
+
+			index += target_len;
+
+			switch (res) {
+			case 0:
+				sprintf(resmsg, "done. (validkey add)\n");
+				return strlen(resmsg);
+
+			case CefC_ValidKey_Err_NoFile:
+				sprintf(resmsg, "failed. (validkey add: pubkey file not found)\n");
+				break;
+
+			case CefC_ValidKey_Err_BadKey:
+				sprintf(resmsg, "failed. (validkey add: bad key format or corrupted key)\n");
+				break;
+
+			case CefC_ValidKey_Err_Mismatch:
+				sprintf(resmsg, "failed. (validkey add: keyid mismatch)\n");
+				break;
+
+			case CefC_ValidKey_Err_NoMemory:
+				sprintf(resmsg, "failed. (validkey add: no memory)\n");
+				break;
+
+			case CefC_ValidKey_Err_TableFull:
+				sprintf(resmsg, "failed. (validkey add: table full)\n");
+				break;
+
+			case CefC_ValidKey_Err_InvalidArg:
+				sprintf(resmsg, "failed. (validkey add: invalid argument)\n");
+				break;
+
+			default:
+				sprintf(resmsg, "failed. (validkey add: unknown error=%d)\n", res);
+				break;
+			}
+
+			break;
+
+		case CefC_ValidKey_OPE_DEL:
+			/* key type (pubkey / keyid) */
+			validkey_type = msg[index];
+			index++;
+
+			if (validkey_type != CefC_ValidKey_CMD_TYPE_KEYID) {
+				sprintf(resmsg, "validkey del requires keyid\n");
+				return strlen(resmsg);
+			}
+
+			/* hash type */
+			memcpy(&hash_type, &msg[index], sizeof(uint16_t));
+			index += sizeof(uint16_t);
+
+			/* key length */
+			memcpy(&key_length, &msg[index], sizeof(uint16_t));
+			index += sizeof(uint16_t);
+
+			/* target length */
+			memcpy(&target_len, &msg[index], sizeof(uint16_t));
+			index += sizeof(uint16_t);
+
+			if (index + target_len > msg_size) {
+				sprintf(resmsg, "invalid message size\n");
+				return strlen(resmsg);
+			}
+
+			if (target_len != key_length * 2) {
+				sprintf(resmsg, "invalid keyid length\n");
+				return strlen(resmsg);
+			}
+
+			target = &msg[index];
+			res = cef_valid_validkey_del(target, key_length, hash_type);
+			index += target_len;
+			switch (res) {
+
+			case 0:
+				sprintf(resmsg, "done. (validkey del)\n");
+				break;
+
+			case CefC_ValidKey_Err_NotFound:
+				sprintf(resmsg, "failed. (validkey del: not found)\n");
+				break;
+
+			case CefC_ValidKey_Err_Mismatch:
+				sprintf(resmsg, "failed. (validkey del: hash type mismatch)\n");
+				break;
+
+			default:
+				sprintf(resmsg, "failed. (validkey del: unknown error=%d)\n", res);
+				break;
+			}
+
+			break;
+
+		case CefC_ValidKey_OPE_SHOW:
+			res = cef_valid_validkey_show(resmsg, CefC_Max_Length);
+
+			if (res < 0) {
+				sprintf(resmsg, "failed. (validkey show)\n");
+				return strlen(resmsg);
+			}
+
+			if (res == 0) {
+				sprintf(resmsg, "No validkey entries.\n");
+				res = strlen(resmsg);
+			}
+			break;
+
+		default:
+			sprintf(resmsg, "unknown cefvalidkey operation type (op=%u)\n", op);
+			return strlen(resmsg);
+		}
+
+		res = strlen(resmsg);
 	}
 
 	return (res);
@@ -3376,6 +3588,8 @@ cefnetd_incoming_interest_process (
 	int pit_res = 0;
 	CefT_Pit_Entry* pe = NULL;
 	CefT_Fib_Entry* fe = NULL;
+	unsigned char* fwd_msg = msg;
+
 #ifdef REFLEXIVE_FORWARDING
 	CefT_Pit_Entry* pe_ref = NULL;
 	int int_type_ref = 0;
@@ -3394,6 +3608,7 @@ cefnetd_incoming_interest_process (
 	uint16_t* fip;
 	double	bw_utilization = 0.0;
 	unsigned int pm_restr_info;
+	int valid_app_reg_f = 0;
 
 #ifdef CefC_Debug
 	cef_dbg_write (CefC_Dbg_Finer,
@@ -3413,7 +3628,7 @@ cefnetd_incoming_interest_process (
 	}
 
 	/* Checks the Validation 			*/
-	res = cef_valid_msg_verify (msg, payload_len + header_len);
+	res = cef_valid_msg_verify (fwd_msg, payload_len + header_len, &valid_app_reg_f);
 	if (res != 0) {
 		/***********************************************************************
 			[rfc8569] 2.4.4. Interest Pipeline
@@ -3421,12 +3636,15 @@ cefnetd_incoming_interest_process (
 			it MAY send an Interest Return (Section 10.3.9).
 		 ***********************************************************************/
 		cef_log_write (CefC_Log_Info, "Drops a malformed Interest.\n");
+#ifdef CefC_Debug
+		cef_dbg_write (CefC_Dbg_Finest, "Drops a malformed Interest.\n");
+#endif // CefC_Debug
 		return (-1);
 	}
 
 	/* Parses the received Interest 	*/
 	res = cef_frame_message_parse (
-					msg, payload_len, header_len, &poh, &pm, CefC_PT_INTEREST);
+					fwd_msg, payload_len, header_len, &poh, &pm, CefC_PT_INTEREST);
 	if (res < 0) {
 #ifdef CefC_Debug
 		cef_dbg_write (CefC_Dbg_Fine, "Detects the invalid Interest\n");
@@ -3468,7 +3686,7 @@ cefnetd_incoming_interest_process (
 #endif
 		if ( (hdl->IR_Option != 0) && (hdl->IR_enable[2] == 1) ) {	//202108
 			unsigned char buff[CefC_Max_Length];	//0.8.3
-			res = cef_frame_interest_return_create( msg, payload_len + header_len, buff, CefC_IR_HOPLIMIT_EXCEEDED );
+			res = cef_frame_interest_return_create( fwd_msg, payload_len + header_len, buff, CefC_IR_HOPLIMIT_EXCEEDED );
 			if ( res < 0 ) {
 				return(-1);
 			}
@@ -3494,6 +3712,42 @@ cefnetd_incoming_interest_process (
 	}
 
 	if (poh.app_reg_f > 0) {
+		if ((hdl->app_reg_level == CefC_AppRegLevel_Mid) || (hdl->app_reg_level == CefC_AppRegLevel_High)) {
+			if (pm.alg.valid_type == CefC_T_ALG_INVALID) {
+				cef_log_write (CefC_Log_Info, "(APP_REG_LEVEL=%d) This Interest doesn't have validation tlvs, "
+						"so drops the Interest for AppReg command.\n", hdl->app_reg_level);
+#ifdef CefC_Debug
+				cef_dbg_write (CefC_Dbg_Finest, "(APP_REG_LEVEL=%d) This Interest doesn't have validation tlvs, "
+						"so drops the Interest for AppReg command.\n", hdl->app_reg_level);
+#endif // CefC_Debug
+				return (-1);
+			}
+
+			res = cef_valid_validkey_exist (
+					pm.alg.keyid.hash_value, pm.alg.keyid.hash_length, pm.alg.keyid.hash_type);
+			if ( res <= 0 ) {
+				cef_log_write (CefC_Log_Info, "(APP_REG_LEVEL=%d) This Interest have validation tlvs, "
+						"but the keyID of this Interest is not registered in the KeyID table of cefnetd, "
+						"so drops the Interest for AppReg command.\n", hdl->app_reg_level);
+#ifdef CefC_Debug
+				cef_dbg_write (CefC_Dbg_Finest, "(APP_REG_LEVEL=%d) This Interest have validation tlvs, "
+						"but the keyID of this Interest is not registered in the KeyID table of cefnetd, "
+						"so drops the Interest for AppReg command.\n", hdl->app_reg_level);
+#endif // CefC_Debug
+				return (-1);
+			}
+			if ((hdl->app_reg_level == CefC_AppRegLevel_High) && (valid_app_reg_f != 1)) {
+				cef_log_write (CefC_Log_Info, "(APP_REG_LEVEL=%d) This Interest have validation tlvs, "
+						"but the Interest hasn't been verified, so drops the Interest for AppReg command.\n",
+						hdl->app_reg_level);
+#ifdef CefC_Debug
+				cef_log_write (CefC_Log_Info, "(APP_REG_LEVEL=%d) This Interest have validation tlvs, "
+						"but the Interest hasn't been verified, so drops the Interest for AppReg command.\n",
+						hdl->app_reg_level);
+#endif // CefC_Debug
+				return (-1);
+			}
+		}
 		cefnetd_input_app_reg_command (hdl, &pm, &poh, (uint16_t) peer_faceid);
 		return (1);
 	}
@@ -3511,7 +3765,7 @@ cefnetd_incoming_interest_process (
 	//0.8.3 Selective
 	if ( pm.InterestType == CefC_PIT_TYPE_Sel ) {
 		res = cefnetd_incoming_selective_interest_process (
-			hdl, faceid, peer_faceid, msg, payload_len, header_len, &pm, &poh);
+			hdl, faceid, peer_faceid, fwd_msg, payload_len, header_len, &pm, &poh);
 		if ( res < 0 ) {
 			return(-1);
 		}
@@ -3579,7 +3833,7 @@ cefnetd_incoming_interest_process (
 #endif // CefC_IsEnable_ContentStore
 
 	/* Updates the information of down face that this Interest arrived 	*/
-	pit_res = cef_pit_entry_down_face_update (pe, peer_faceid, &pm, &poh, msg, hdl->InterestRetrans);	//0.8.3
+	pit_res = cef_pit_entry_down_face_update (pe, peer_faceid, &pm, &poh, fwd_msg, hdl->InterestRetrans);	//0.8.3
 	cef_pit_entry_unlock (pe);
 
 #ifdef REFLEXIVE_FORWARDING
@@ -3608,7 +3862,7 @@ cefnetd_incoming_interest_process (
 #endif
 		if ( (hdl->IR_Option != 0) && (hdl->IR_enable[2] == 1) ) {	//202108
 			unsigned char buff[CefC_Max_Length];	//0.8.3
-			res = cef_frame_interest_return_create( msg, payload_len + header_len, buff, CefC_IR_HOPLIMIT_EXCEEDED );
+			res = cef_frame_interest_return_create( fwd_msg, payload_len + header_len, buff, CefC_IR_HOPLIMIT_EXCEEDED );
 			if ( res < 0 ) {
 				return(-1);
 			}
@@ -3760,7 +4014,7 @@ cefnetd_incoming_interest_process (
 			elem.in_faceid 			= (uint16_t) peer_faceid;
 			elem.bw_utilization 	= bw_utilization;
 			elem.parsed_msg 		= &pm;
-			memcpy (&(elem.msg[0]), msg, payload_len + header_len);
+			memcpy (&(elem.msg[0]), fwd_msg, payload_len + header_len);
 			elem.msg_len 			= payload_len + header_len;
 			elem.out_faceid_num 	= face_num;
 
@@ -3787,7 +4041,7 @@ cefnetd_incoming_interest_process (
 				if ( elem.msg_len == pkt_len ){
 					header_len = chp->hdr_len;
 					payload_len = pkt_len - header_len;
-					memcpy (msg, &(elem.msg[0]), elem.msg_len);
+					fwd_msg = &(elem.msg[0]);
 #ifdef CefC_Debug
 				} else {
 cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsistent.\n",
@@ -3828,14 +4082,12 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 		/* Checks Content Store */
 		if (hdl->cs_stat->cache_type != CefC_Default_Cache_Type) {	//#938
 
-			if (pm.org.version_f == 1 && pm.org.version_len == 0) {
-				/* This interest is VerReq, so don't have to search the cache */
-				forward_interest_f = 1;
-				goto FORWARD_INTEREST;
-			}
 			/* Checks the temporary/local cache in cefnetd 		*/
 			unsigned char* cob = NULL;
-			cs_res = cef_csmgr_cache_lookup (hdl->cs_stat, peer_faceid, &pm, &poh, pe, &cob);
+			cs_res = -1;
+			if ( !pm.KeyIdRestr_f && !pm.ObjHashRestr_f) {
+				cs_res = cef_csmgr_cache_lookup (hdl->cs_stat, peer_faceid, &pm, &poh, pe, &cob);
+			}
 
 			if (cs_res < 0) {
 #ifdef	CefC_Conpub
@@ -3894,7 +4146,7 @@ FORWARD_INTEREST:
 					"Forward the Interest to the local application(s)\n");
 #endif // CefC_Debug
 				cefnetd_frame_send_normal (hdl,
-					*fip, msg, (size_t) (payload_len + header_len));
+					*fip, fwd_msg, (size_t) (payload_len + header_len));
 
 				cef_pit_entry_up_face_update (pe, *fip, &pm, &poh);
 
@@ -3902,7 +4154,7 @@ FORWARD_INTEREST:
 				/* if Trigger Interest, create template pit */
 				if (int_type_ref == CefC_Trigger_Msg){
 					if (pm.chunk_num_f == 0) {
-						cefnetd_make_template_pit ( hdl, msg, &pm, &poh , peer_faceid, pe);
+						cefnetd_make_template_pit ( hdl, fwd_msg, &pm, &poh , peer_faceid, pe);
 					} else {
 						cefnetd_pit_lifetime_update_for_reflexive (
 							hdl->pit, &pm, &poh, *fip, 0, 1);
@@ -3916,7 +4168,7 @@ FORWARD_INTEREST:
 #ifdef REFLEXIVE_FORWARDING
 		/* if Reflexive Interest, send the Interest to the Upface of reflexive pit  */
 		if ((forward_interest_f) && (int_type_ref == CefC_Reflexive_Msg)) {
-			cefnetd_frame_send_core (hdl, face_num, faceids, msg, (size_t) (payload_len + header_len),
+			cefnetd_frame_send_core (hdl, face_num, faceids, fwd_msg, (size_t) (payload_len + header_len),
 				CefT_TxQue_Normal, 1);
 
 			return (1);
@@ -3928,7 +4180,7 @@ FORWARD_INTEREST:
 			cef_dbg_write (CefC_Dbg_Finer, "Forward the Interest to the next cefnetd(s)\n");
 #endif // CefC_Debug
 			cefnetd_interest_forward (
-				hdl, faceids, face_num, peer_faceid, msg,
+				hdl, faceids, face_num, peer_faceid, fwd_msg,
 				payload_len, header_len, &pm, &poh, pe, fe
 			);
 #ifdef REFLEXIVE_FORWARDING
@@ -3936,7 +4188,7 @@ FORWARD_INTEREST:
 			/* if Trigger Interest, create or update template PIT */
 			if (int_type_ref == CefC_Trigger_Msg){
 				if (pm.chunk_num_f == 0) {
-					cefnetd_make_template_pit ( hdl, msg, &pm, &poh , peer_faceid, pe);
+					cefnetd_make_template_pit ( hdl, fwd_msg, &pm, &poh , peer_faceid, pe);
 				} else {
 					for (int k=0; k < face_num; k ++) {
 						if (faceids[k] != peer_faceid) {
@@ -3965,7 +4217,7 @@ FORWARD_INTEREST:
 #ifdef	CefC_INTEREST_RETURN
 				if ( (hdl->IR_Option != 0) && (hdl->IR_enable[1] == 1) ) {	//202108
 					unsigned char buff[CefC_Max_Length];	//0.8.3
-					res = cef_frame_interest_return_create( msg, payload_len + header_len, buff, CefC_IR_NO_ROUTE);
+					res = cef_frame_interest_return_create( fwd_msg, payload_len + header_len, buff, CefC_IR_NO_ROUTE);
 					if ( (hdl->cs_mode == 2) || (hdl->cs_mode == 3) ) {
 						//Hold pe peer_faceid
 						res = cef_pit_interest_return_set( pe, &pm, &poh, peer_faceid, CefC_IR_NO_ROUTE, res, buff );
@@ -3988,7 +4240,7 @@ FORWARD_INTEREST:
 #ifdef	CefC_INTEREST_RETURN
 				if ( (hdl->IR_Option != 0) && (hdl->IR_enable[1] == 1) ) {	//202108
 					unsigned char buff[CefC_Max_Length];	//0.8.3
-					res = cef_frame_interest_return_create( msg, payload_len + header_len, buff, CefC_IR_NO_ROUTE);
+					res = cef_frame_interest_return_create( fwd_msg, payload_len + header_len, buff, CefC_IR_NO_ROUTE);
 					if ( (hdl->cs_mode == 2) || (hdl->cs_mode == 3) ) {
 						//Hold pe peer_faceid
 						res = cef_pit_interest_return_set( pe, &pm, &poh, peer_faceid, CefC_IR_NO_ROUTE, res, buff );
@@ -4369,6 +4621,8 @@ cefnetd_incoming_object_process_core (
 	CefT_Hash_Handle pit_handle = hdl->pit;
 	int pe_hit_f = 0;
 	int pe_seq = 0;
+	unsigned char* fwd_msg = msg;
+	int cache_f = 0;
 
 
 	cefnetd_faceidmap_init(faceid_bitmap, sizeof(faceid_bitmap));
@@ -4378,7 +4632,7 @@ cefnetd_incoming_object_process_core (
 
 	if (obj_sender_type == CefC_OBJ_Sender_Type_Localcache) {
 		struct fixed_hdr* chp;
-		chp = (struct fixed_hdr*) msg;
+		chp = (struct fixed_hdr*) fwd_msg;
 		pkt_len = ntohs (chp->pkt_len);
 		header_len = chp->hdr_len;
 		payload_len = pkt_len - header_len;
@@ -4410,14 +4664,17 @@ cefnetd_incoming_object_process_core (
 	}
 
 	/* Checks the Validation 			*/
-	res = cef_valid_msg_verify (msg, payload_len + header_len);
+	res = cef_valid_msg_verify (fwd_msg, payload_len + header_len, &cache_f);
 	if (res != 0) {
 		cef_log_write (CefC_Log_Info, "Drops a malformed Object.\n");
+#ifdef CefC_Debug
+		cef_dbg_write (CefC_Dbg_Finest, "Drops a malformed Interest.\n");
+#endif // CefC_Debug
 		return (-1);
 	}
 
 	res = cef_frame_message_parse (
-					msg, payload_len, header_len, &poh, &pm, CefC_PT_OBJECT);
+					fwd_msg, payload_len, header_len, &poh, &pm, CefC_PT_OBJECT);
 	if (res < 0) {
 #ifdef CefC_Debug
 		cef_dbg_write (CefC_Dbg_Fine, "Detects the invalid Content Object\n");
@@ -4462,7 +4719,7 @@ cefnetd_incoming_object_process_core (
 #ifdef CefC_Debug
 		cef_dbg_write (CefC_Dbg_Finer, "Insert the received Content Object to the buffer\n");
 #endif // CefC_Debug
-		cef_csmgr_cache_insert (hdl->cs_stat, msg, payload_len + header_len, &pm, &poh);
+		cef_csmgr_cache_insert (hdl->cs_stat, fwd_msg, payload_len + header_len, &pm, &poh);
 	}
 
 	/*--------------------------------------------------------------------
@@ -4485,7 +4742,7 @@ cefnetd_incoming_object_process_core (
 		CefT_FwdStrtgy_Param	fwdstr = { 0 };
 
 		/* Set parameters */
-		fwdstr.msg             = msg;
+		fwdstr.msg             = fwd_msg;
 		fwdstr.payload_len     = payload_len;
 		fwdstr.header_len      = header_len;
 		fwdstr.pm              = &pm;
@@ -4590,7 +4847,7 @@ cefnetd_incoming_object_process_core (
 		elem.hashv 				= contents_hashv;
 		elem.in_faceid 			= (uint16_t) peer_faceid;
 		elem.parsed_msg 		= &pm;
-		memcpy (&(elem.msg[0]), msg, payload_len + header_len);
+		memcpy (&(elem.msg[0]), fwd_msg, payload_len + header_len);
 		elem.msg_len 			= payload_len + header_len;
 		elem.out_faceid_num 	= face_num;
 
@@ -4618,7 +4875,7 @@ cefnetd_incoming_object_process_core (
 			if ( elem.msg_len == pkt_len ){
 				header_len = chp->hdr_len;
 				payload_len = pkt_len - header_len;
-				memcpy (msg, &(elem.msg[0]), elem.msg_len);
+				fwd_msg = &(elem.msg[0]);
 #ifdef CefC_Debug
 			} else {
 cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsistent.\n",
@@ -4629,7 +4886,7 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 	}
 
 #if CefC_IsEnable_ContentStore
-	if (obj_sender_type == CefC_OBJ_Sender_Type_Neighbor) {
+	if ((obj_sender_type == CefC_OBJ_Sender_Type_Neighbor) && (cache_f == 1)){
 		/*--------------------------------------------------------------------
 			Content Store
 		----------------------------------------------------------------------*/
@@ -4639,7 +4896,7 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 			cef_dbg_write (CefC_Dbg_Finer, "Forward the Content Object to cache\n");
 #endif // CefC_Debug
 			cef_csmgr_excache_item_put (
-				hdl->cs_stat, msg, payload_len + header_len, peer_faceid, &pm, &poh);
+				hdl->cs_stat, fwd_msg, payload_len + header_len, peer_faceid, &pm, &poh);
 		}
 	}
 #endif // CefC_IsEnable_ContentStore
@@ -4652,7 +4909,7 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 #ifdef CefC_Debug
 			cef_dbg_write (CefC_Dbg_Finer, "Forward the Content Object to cefnetd(s)\n");
 #endif // CefC_Debug
-			cefnetd_object_forward (hdl, faceids, face_num, msg,
+			cefnetd_object_forward (hdl, faceids, face_num, fwd_msg,
 				payload_len, header_len, &pm, &poh);
 
 		}
@@ -4753,9 +5010,12 @@ cefnetd_incoming_intreturn_process (
 	}
 
 	/* Checks the Validation 			*/
-	res = cef_valid_msg_verify (msg, payload_len + header_len);
+	res = cef_valid_msg_verify (msg, payload_len + header_len, NULL);
 	if (res != 0) {
 		cef_log_write (CefC_Log_Info, "Drops a malformed Interest Return.\n");
+#ifdef CefC_Debug
+		cef_dbg_write (CefC_Dbg_Finest, "Drops a malformed Interest.\n");
+#endif // CefC_Debug
 		return (-1);
 	}
 
@@ -6032,6 +6292,9 @@ cefnetd_config_read (
 	int 	res;
 	double 	res_dbl;
 	int		IR_enabled = 0;
+	char	keyid_list_path[PATH_MAX] = "/usr/local/cefore/keyid.list";
+	int		validkey_table_size = CefC_Default_ValidKey_Table_Size;
+	int		validation_mode = CefC_ValidMode_InBand;
 
 	/* Obtains the directory path where the cefnetd's config file is located. */
 	cef_client_config_dir_get (ws_w);
@@ -6450,6 +6713,36 @@ cefnetd_config_read (
 		else if (strcmp (pname, "FACE_LIFETIME") == 0) {
 			hdl->face_lifetime = strtol (ws, NULL, 10) * 60;	/* minutes -> seconds */
 		}
+		else if (strcmp (pname, "VALIDKEY_TABLE_SIZE") == 0) {
+			res = atoi (ws);
+			if (res < 3) {
+				cef_log_write (CefC_Log_Error, "VALIDKEY_TABLE_SIZE must be higher than 2.\n");
+				return (-1);
+			}
+			if (res > CefC_Maximum_ValidKey_Table_Size) {
+				cef_log_write (CefC_Log_Error, "VALIDKEY_TABLE_SIZE must be lower than %d.\n", CefC_Maximum_ValidKey_Table_Size);
+				return (-1);
+			}
+			validkey_table_size = res;
+		}
+		else if (strcasecmp (pname, "VALIDATION_MODE") == 0) {
+			res = atoi (ws);
+			if (!(res == 0 || res == 1 || res == 2)) {
+				cef_log_write (CefC_Log_Error, "VALIDATION_MODE must be 0, 1 or 2.\n");
+				return (-1);
+			}
+			validation_mode = res;
+		}
+		else if (strcasecmp (pname, "APP_REG_LEVEL") == 0) {
+			res = atoi (ws);
+			if (!(res == 0 || res == 1 || res == 2)) {
+				cef_log_write (CefC_Log_Error, "APP_REG_LEVEL must be 0, 1 or 2.\n");
+				return (-1);
+			}
+			hdl->app_reg_level = res;
+		} else if (strcasecmp(pname, "PATH_KEYID_LIST") == 0) {
+			strcpy(keyid_list_path, ws);
+		}
 #ifdef CefC_Debug
 		else if (strcmp (pname, "CEF_DEBUG_LEVEL") == 0) {
 			int log_lv = 0;
@@ -6464,6 +6757,13 @@ cefnetd_config_read (
 		}
 	}
 	fclose (fp);
+
+	if (cef_valid_validkey_table_init(keyid_list_path, validkey_table_size, validation_mode) < 0) {
+
+		cef_log_write(CefC_Log_Error, "Failed to load KeyID list (%s)\n", keyid_list_path);
+
+		return (-1);
+	}
 
 	//202108
 	if ( hdl->IR_Option ) {
@@ -7244,10 +7544,9 @@ fprintf( stderr, "[%s] elem_get rec_index=%d, elm_num=%d\n", __func__, rec_index
 				face = &(pe->clean_dnfaces);
 				idx = 0;
 
-				while (face->next) {
+				for (idx = 0; idx < CefC_Elem_Face_Num && face->next; idx++) {
 					face = face->next;
 					sig_delpit.faceids[idx] = face->faceid;
-					idx++;
 				}
 
 				if (idx > 0) {
@@ -8247,15 +8546,15 @@ cefnetd_keyid_get (
 	if ( t_keyid_type != CefC_T_KEYID ) {
 		return (-1);
 	}
-	if ( t_keyid_len != CefC_Fib_Keyid_Len ) {
+	if ( t_keyid_len != CefC_HashVal_Len ) {
 #ifdef CefC_Debug
 		cef_dbg_write (CefC_Dbg_Fine,
-			"t_keyid_len(%d) is invalid, Supported KeyId length is only %d bytes.\n", t_keyid_len, CefC_Fib_Keyid_Len);
+			"t_keyid_len(%d) is invalid, Supported KeyId length is only %d bytes.\n", t_keyid_len, CefC_HashVal_Len);
 #endif
 		return (-1);
 	}
 	t_keyid_offset += CefC_S_TLF;
-	memcpy( keyid_buff, &msg[t_keyid_offset], CefC_Fib_Keyid_Len );
+	memcpy( keyid_buff, &msg[t_keyid_offset], CefC_HashVal_Len );
 
 	return ( t_keyid_len );
 
@@ -8667,11 +8966,11 @@ cefnetd_route_msg_check (
 	}
 
 	if (strncmp ((char *)&msg[index], CefC_Fib_Keyid_Identifier, strlen(CefC_Fib_Keyid_Identifier)) == 0) {
-		if ((msg_size - index) < (strlen(CefC_Fib_Keyid_Identifier) + CefC_Fib_Keyid_Len)) {
+		if ((msg_size - index) < (strlen(CefC_Fib_Keyid_Identifier) + CefC_HashVal_Len)) {
 			/* message is too short */
 			return (0);
 		}
-		index += strlen(CefC_Fib_Keyid_Identifier) + CefC_Fib_Keyid_Len;
+		index += strlen(CefC_Fib_Keyid_Identifier) + CefC_HashVal_Len;
 	}
 
 	while (index < msg_size) {
