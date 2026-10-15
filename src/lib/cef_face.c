@@ -467,7 +467,6 @@ cef_face_lookup_local_faceid (
 	face_tbl[faceid].index = index;
 	face_tbl[faceid].fd = entry->skfd;
 	face_tbl[faceid].local_f = 1;
-    face_tbl[faceid].protocol = CefC_Face_Type_Local;
 
 #ifdef CefC_Debug
 	cef_dbg_write (CefC_Dbg_Finer,
@@ -1074,11 +1073,6 @@ cef_face_local_face_create (
 	}
 #endif // __APPLE__
 
-#ifdef SO_NOSIGPIPE		// for MacOS(BSD)
-{   int yes = 1;
-    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));	}
-#endif	// SO_NOSIGPIPE
-
 	switch ( sk_type ) {
 	case SOCK_STREAM:
 	case SOCK_SEQPACKET:
@@ -1231,7 +1225,6 @@ cef_face_send_sockentry (
 	int				msg_len					/* length of the message to send 			*/
 ) {
 	int	res = 0;
-	int	msg_flags = 0;
 
 	if (!entry || !faceinf)
 		return res;
@@ -1242,22 +1235,22 @@ cef_face_send_sockentry (
 		3. UDP
 	 ***********************/
 
-#ifdef	MSG_NOSIGNAL		// Linux only...
-	msg_flags = MSG_NOSIGNAL;
-#endif	// MSG_NOSIGNAL
-	if ( faceinf->local_f
-	  || faceinf->protocol == CefC_Face_Type_Tcp) {
+	if (faceinf->local_f) {
 		/*********************/
 		/*	1. local socket  */
-		/*	2. TCP	         */
 		/*********************/
-		res = send (entry->skfd, msg, msg_len, msg_flags);
+		res = send (entry->skfd, msg, msg_len, 0);
+	} else if (faceinf->protocol == CefC_Face_Type_Tcp) {
+		/************/
+		/*	2. TCP	*/
+		/************/
+		res = write (entry->skfd, msg, msg_len);
 	} else {
 		/************/
 		/*	3. UDP	*/
 		/************/
 		res = sendto (entry->skfd, msg, msg_len,
-					msg_flags, entry->ai_addr, entry->ai_addrlen);
+					0, entry->ai_addr, entry->ai_addrlen);
 	}
 
 	return res;
@@ -1379,7 +1372,7 @@ cef_face_frame_send (
 #ifdef CefC_Debug
 		if( msg_len > 0 ){
 			cef_dbg_write (CefC_Dbg_Fine,
-				"[face] Face#%d unknown faceid.\n", faceid);
+				"[face] Face#%d (FD#%d) unknown faceid.\n", faceid, entry->skfd);
 		}
 #endif // CefC_Debug
 		return -1;

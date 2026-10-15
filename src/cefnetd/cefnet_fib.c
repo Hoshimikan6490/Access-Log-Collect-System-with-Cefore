@@ -53,26 +53,27 @@ cefnetd_fib_set_faceid (
 	int faceid,
 	uint8_t type,							//0.8.3c
 	CefT_Fib_Metric*	fib_metric,			//0.8.3c
-	CefT_HashData* keyid
+	int keyid_len,
+	unsigned char*  keyid
 ) {
 	CefT_Fib_Face* face = &(entry->faces);
 
 	while (face->next) {
 		face = face->next;
-		if (face->faceid == faceid) {
-			if ( (keyid == NULL && face->keyid_len == 0)
-				|| ((face->keyid.hash_type == keyid->hash_type)
-					&& (face->keyid.hash_length == keyid->hash_length)
-					&& (memcmp (face->keyid.hash_value, keyid->hash_value, keyid->hash_length) == 0))
-			){
-				face->type |= type;
+		//if ((face->faceid == faceid) && (strncmp ((char*)face->keyid, (char*)keyid, CefC_Fib_Keyid_Len) == 0)) {
+		if ((face->faceid == faceid) &&
+			((keyid == NULL && face->keyid_len == 0) ||
+				((face->keyid_len == keyid_len) &&
+				 !memcmp (face->keyid, keyid, CefC_Fib_Keyid_Len))
+			)){
 
-				if ( fib_metric != NULL ) {
-					memcpy(&(face->metric), fib_metric, sizeof(CefT_Fib_Metric));
-				}
+			face->type |= type;
 
-				return;
+			if ( fib_metric != NULL ) {
+				memcpy(&(face->metric), fib_metric, sizeof(CefT_Fib_Metric));
 			}
+
+			return;
 		}
 	}
 
@@ -95,17 +96,11 @@ cefnetd_fib_set_faceid (
 		memcpy(&(face->next->metric), fib_metric, sizeof(CefT_Fib_Metric));
 	}
 
-	memset (&(face->next->keyid), 0, sizeof(CefT_HashData));
-	if (( keyid != NULL ) && (keyid->hash_length > 0)) {
-		face->next->keyid_len = keyid->hash_length + 4;
-		face->next->keyid.hash_type = keyid->hash_type;
-		face->next->keyid.hash_length = keyid->hash_length;
-		memcpy (&face->next->keyid.hash_value, &keyid->hash_value, face->next->keyid.hash_length);
-
-		if ( face->next->type != CefC_Fib_Entry_Dynamic ) {
-			face->next->adv_f = 1;
-		}
+	memset (&(face->next->keyid), 0, sizeof(face->next->keyid));
+	if ( keyid != NULL && keyid_len > 0 ) {
+		memcpy (&(face->next->keyid), keyid, keyid_len);
 	}
+	face->next->keyid_len = keyid_len;
 
 #ifdef	__FIB_METRIC_DEV__
 	fprintf( stderr, "[%s] face->next->metric.cost:%d   face->next->metric.dummy_metric:%d \n",
@@ -123,27 +118,27 @@ cefnetd_fib_remove_faceid (
 	CefT_Fib_Entry* entry,
 	int faceid,
 	uint8_t fe_type,
-	CefT_HashData* keyid
+	int keyid_len,
+	unsigned char*  keyid
 ) {
 	CefT_Fib_Face* face = &(entry->faces);
 	CefT_Fib_Face* prev = face;
 
 	while (face->next) {
 		face = face->next;
-		if (face->faceid == faceid) {
-			if ( (( keyid == NULL ) || (keyid->hash_length == 0)) 
-				|| ((face->keyid.hash_type == keyid->hash_type)
-					&& (face->keyid.hash_length == keyid->hash_length)
-					&& !memcmp (face->keyid.hash_value, keyid->hash_value, keyid->hash_length))
-			){
-				face->type &= ~fe_type;
+		if ((face->faceid == faceid) &&
+			(keyid == NULL ||
+				((face->keyid_len == keyid_len) &&
+				 !memcmp (face->keyid, keyid, CefC_Fib_Keyid_Len))
+			)){
 
-				if (fe_type > face->type) {
-					prev->next = face->next;
-					free (face);
-				}
-				return (1);
+			face->type &= ~fe_type;
+
+			if (fe_type > face->type) {
+				prev->next = face->next;
+				free (face);
 			}
+			return (1);
 		}
 		prev = face;
 	}
@@ -206,7 +201,8 @@ cefnetd_fib_route_add (
 	CefT_Fib_Metric	*fib_metric,			//0.8.3c
 	int name_len,
 	unsigned char *name,
-	CefT_HashData* keyid					/* extantion for full-source forwarding		*/
+	int keyid_len,							/* extantion for full-source forwarding		*/
+	unsigned char *keyid					/* extantion for full-source forwarding		*/
 ) {
 	CefT_Fib_Entry* entry;
 
@@ -224,8 +220,7 @@ cefnetd_fib_route_add (
 		cef_hash_tbl_item_set (fib, name, name_len, entry);
 	}
 
-	cefnetd_fib_set_faceid (entry, faceid, fe_type, fib_metric, keyid);
-
+	cefnetd_fib_set_faceid (entry, faceid, fe_type, fib_metric, keyid_len, keyid);
 
 	if (name_len == CefC_Fib_DefaultRoute_Len) {
 		cef_fib_set_default_route (entry);
@@ -242,7 +237,8 @@ cefnetd_fib_route_del (
 	uint8_t fe_type,						/* CefC_Fib_Entry_XXX				0.8.3c	*/
 	int name_len,
 	unsigned char *name,
-	CefT_HashData* keyid					/* extantion for full-source forwarding		*/
+	int keyid_len,
+	unsigned char *keyid
 ) {
 	CefT_Fib_Entry* fib_entry;
 	int res, num_faces = -1;
@@ -255,7 +251,7 @@ cefnetd_fib_route_del (
 	}
 
 	/* remove the specified face from fib entry */
-	res = cefnetd_fib_remove_faceid (fib_entry, faceid, fe_type, keyid);
+	res = cefnetd_fib_remove_faceid (fib_entry, faceid, fe_type, keyid_len, keyid);
 	if (res <= 0) {
 		return (-2);
 	}
@@ -343,11 +339,11 @@ cefnetd_fib_route_msg_process (
 	int			a_type_s = 0;
 	//
 	int cost = 0;
-	CefT_HashData keyid;
+	int keyid_len = 0;
+	unsigned char keyid[CefC_Fib_Keyid_Len] = {0};
 	CefT_Fib_Metric fib_metric_tmp;
 
 	memset( &fib_metric_tmp, 0x00, sizeof(CefT_Fib_Metric) );
-	memset( &keyid, 0x00, sizeof(CefT_HashData) );
 
 	/* Inits the return code 		*/
 	*rc = 0x00;
@@ -414,11 +410,9 @@ cefnetd_fib_route_msg_process (
 	/* get keyid */
 	if (strncmp ((char *)&msg[index], CefC_Fib_Keyid_Identifier, strlen(CefC_Fib_Keyid_Identifier)) == 0) {
 		index += strlen(CefC_Fib_Keyid_Identifier);
-
-		keyid.hash_type = CefC_T_SHA_256;
-		keyid.hash_length = CefC_HashVal_Len;
-		memcpy (keyid.hash_value, &msg[index], keyid.hash_length);
-		index += keyid.hash_length;
+		memcpy (keyid, &msg[index], CefC_Fib_Keyid_Len);
+		keyid_len = CefC_Fib_Keyid_Len;
+		index += CefC_Fib_Keyid_Len;
 	}
 
 	bentry = cef_hash_tbl_item_get(fib, name, name_len);
@@ -473,7 +467,7 @@ cefnetd_fib_route_msg_process (
 				return (-1);
 			}
 			res = cefnetd_fib_route_add (fib, faceid, fe_type, fib_metric,
-						name_len, name, &keyid);
+						name_len, name, keyid_len, keyid);
 			switch ( res ){
 			case 1:
 				cef_log_write (CefC_Log_Info,
@@ -486,7 +480,7 @@ cefnetd_fib_route_msg_process (
 #endif // CefC_Debug
 			default:
 #ifdef CefC_Debug
-				cef_dbg_write (CefC_Dbg_Fine, "cefnetd_fib_route_add:res=%d, URI=%s\n", res, uri);
+				cef_dbg_write (CefC_Dbg_Fine, "cefnetd_fib_route_add:res=%d\n", res);
 #endif // CefC_Debug
 				break;
 			}
@@ -507,7 +501,7 @@ cefnetd_fib_route_msg_process (
 			}
 
 			res = cefnetd_fib_route_del (fib, faceid, fe_type,
-						name_len, name, &keyid);
+						name_len, name, keyid_len, keyid);
 			switch ( res ){
 			case -1:
 				cef_log_write (CefC_Log_Error,"%s is not registered in FIB\n", uri);
@@ -900,11 +894,9 @@ cefnetd_request_forwarding_info (
 				*rsp_msgpp = (unsigned char*)new;
 				buff_size += CefC_Max_Length;
 			}
-			if (cef_frame_is_rootname(aentry->name, aentry->name_len) != 1) {
-				memcpy (&buff[msg_len], &aentry->name_len, sizeof (uint16_t));
-				memcpy (&buff[msg_len + sizeof (uint16_t)], aentry->name, aentry->name_len);
-				msg_len += sizeof (uint16_t) + aentry->name_len;
-			}
+			memcpy (&buff[msg_len], &aentry->name_len, sizeof (uint16_t));
+			memcpy (&buff[msg_len + sizeof (uint16_t)], aentry->name, aentry->name_len);
+			msg_len += sizeof (uint16_t) + aentry->name_len;
 		}
 		index++;
 	} while (aentry);
@@ -957,11 +949,9 @@ cefnetd_request_forwarding_info (
 			*rsp_msgpp = (unsigned char*)new;
 			buff_size += CefC_Max_Length;
 		}
-		if (cef_frame_is_rootname(fentry->key, fentry->klen) != 1) {
-			memcpy (&buff[msg_len], &fentry->klen, sizeof (uint16_t));
-			memcpy (&buff[msg_len + sizeof (uint16_t)], fentry->key, fentry->klen);
-			msg_len += sizeof (uint16_t) + fentry->klen;
-		}
+		memcpy (&buff[msg_len], &fentry->klen, sizeof (uint16_t));
+		memcpy (&buff[msg_len + sizeof (uint16_t)], fentry->key, fentry->klen);
+		msg_len += sizeof (uint16_t) + fentry->klen;
 		index++;
 	}
 

@@ -341,6 +341,7 @@ cef_fib_faceid_cleanup (
 	CefT_Hash_Handle fib
 ) {
 	CefT_Fib_Entry* entry;
+	CefT_Fib_Entry* work;
 	uint32_t index = 0;
 	CefT_Fib_Face* face;
 	CefT_Fib_Face* prev;
@@ -355,7 +356,6 @@ cef_fib_faceid_cleanup (
 			while (face->next) {
 				face = face->next;
 				if (cef_face_check_close (face->faceid)) {
-cef_dbg_write (CefC_Dbg_Finer, "drop FIB upface:%d\n", face->faceid);
 					prev->next = face->next;
 					free (face);
 					break;
@@ -364,17 +364,13 @@ cef_dbg_write (CefC_Dbg_Finer, "drop FIB upface:%d\n", face->faceid);
 			}
 
 			if (entry->faces.next == NULL) {
-                CefT_Fib_Entry* work
-                    = (CefT_Fib_Entry*) cef_hash_tbl_item_remove_from_index (fib, index);
+				work = (CefT_Fib_Entry*) cef_hash_tbl_item_remove_from_index (fib, index);
 
-				if (work){
-                    if (work->klen == CefC_Fib_DefaultRoute_Len) {
-                        default_route = NULL;
-                    }
-                    if (work->key)
-                        free (work->key);
-                    free (work);
-                }
+				if (work->klen == CefC_Fib_DefaultRoute_Len) {
+					default_route = NULL;
+				}
+				free (work->key);
+				free (work);
 			}
 		}
 		index++;
