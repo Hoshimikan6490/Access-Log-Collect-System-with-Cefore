@@ -70,6 +70,7 @@
  Macros
  ****************************************************************************************/
 
+#define MemC_Max_KLen 				1024
 /****************************************************************************************
  Structures Declaration
  ****************************************************************************************/
@@ -149,7 +150,9 @@ mem_cache_item_get (
 	unsigned char* key,							/* content name							*/
 	uint16_t key_size,							/* content name Length					*/
 	uint32_t seqno,								/* chunk num							*/
-	int sock									/* received socket						*/
+	int sock,									/* received socket						*/
+	unsigned char* version,						/* version								*/
+	uint16_t ver_len							/* length of version					*/
 );
 /*--------------------------------------------------------------------------------------
 	Upload content byte steream
@@ -228,6 +231,14 @@ static ConpubdT_Content_Mem_Entry*
 cef_mem_hash_tbl_item_remove (
 	const unsigned char* key,
 	uint32_t klen
+);
+
+int												/* length of the created key 			*/
+conpubd_key_create_by_Mem_Entry (
+	unsigned char*	name,
+	uint16_t		name_len,
+	uint32_t		chunk_num,
+	unsigned char* key
 );
 
 /****************************************************************************************
@@ -352,7 +363,7 @@ mem_cs_expire_check (
 	uint64_t 	nowt;
 	struct timeval tv;
 	int n;
-	unsigned char trg_key[CefC_Conpub_Key_Max];
+	unsigned char trg_key[65535];
 	int trg_key_len;
 
 	pthread_mutex_lock (&conpub_mem_cs_mutex);
@@ -373,25 +384,18 @@ mem_cs_expire_check (
 				wcp = cp->next;
 				if (((entry->expiry != 0) && (entry->expiry < nowt))) {
 					/* Removes the expiry cache entry 		*/
-					trg_key_len = conpubd_name_chunknum_concatenate
+					trg_key_len = conpubd_key_create_by_Mem_Entry
 									(entry->name, entry->name_len, entry->chunk_num, trg_key);
 					entry1 = cef_mem_hash_tbl_item_remove (trg_key, trg_key_len);
-#ifdef CefC_Debug
-char	buff_uri[CefC_NAME_MAXLEN];
-cef_frame_conversion_name_to_uri(trg_key, trg_key_len, buff_uri);
-conpubd_dbg_write (CefC_Dbg_Finer, "%s(%d) %s(key_len=%d), entry1=%p.\n", __func__, __LINE__, buff_uri, trg_key_len, entry1);
-#endif	// CefC_Debug
-					if ( entry1 ){
-						conpubd_stat_cob_remove (
-							conpub_stat_hdl, entry->name, entry->name_len,
-							entry->chunk_num, entry->pay_len);
-						cobpub_hdl->cache_cobs--;
-						if (entry1->msg)
-							free (entry1->msg);
-						if (entry1->name)
-							free (entry1->name);
-						free (entry1);
-					}
+					if ( !entry1 )
+						continue;
+					conpubd_stat_cob_remove (
+						conpub_stat_hdl, entry->name, entry->name_len,
+						entry->chunk_num, entry->pay_len);
+					cobpub_hdl->cache_cobs--;
+					free (entry1->msg);
+					free (entry1->name);
+					free (entry1);
 				}
 			}
 		}
@@ -409,10 +413,12 @@ mem_cache_item_get (
 	unsigned char* key,							/* content name							*/
 	uint16_t key_size,							/* content name Length					*/
 	uint32_t seqno,								/* chunk num							*/
-	int sock									/* received socket						*/
+	int sock,									/* received socket						*/
+	unsigned char* version,						/* version								*/
+	uint16_t ver_len							/* length of version					*/
 ) {
 	ConpubdT_Content_Mem_Entry* entry;
-	unsigned char 	trg_key[CefC_Conpub_Key_Max];
+	unsigned char 	trg_key[ConpubdC_Key_Max];
 	int 			trg_key_len;
 	uint64_t 		nowt;
 	struct timeval 	tv;
@@ -448,11 +454,20 @@ mem_cache_item_get (
 			return (0);
  		}
 		else {
-#ifdef CefC_Debug
-char	buff_uri[CefC_NAME_MAXLEN];
-cef_frame_conversion_name_to_uri(trg_key, trg_key_len, buff_uri);
-conpubd_dbg_write (CefC_Dbg_Finer, "%s(%d) Expired %s, entry=%p.\n", __func__, __LINE__, buff_uri, entry);
-#endif	// CefC_Debug
+			pthread_mutex_lock (&conpub_mem_cs_mutex);
+			/* Removes the expiry cache entry 		*/
+			entry = cef_mem_hash_tbl_item_remove (trg_key, trg_key_len);
+			if ( entry ){
+				conpubd_stat_cob_remove (
+					conpub_stat_hdl, entry->name, entry->name_len,
+					entry->chunk_num, entry->pay_len);
+				cobpub_hdl->cache_cobs--;
+
+				free (entry->msg);
+				free (entry->name);
+				free (entry);
+			}
+			pthread_mutex_unlock (&conpub_mem_cs_mutex);
 		}
 	}
 
@@ -491,7 +506,7 @@ mem_cache_cob_write (
 	int index = 0;
 	ConpubdT_Content_Mem_Entry* entry;
 	ConpubdT_Content_Mem_Entry* old_entry = NULL;
-	unsigned char 	trg_key[CefC_Conpub_Key_Max];
+	unsigned char 	trg_key[ConpubdC_Key_Max];
 	int 			trg_key_len;
 	uint64_t nowt;
 	struct timeval tv;
@@ -531,10 +546,8 @@ mem_cache_cob_write (
 		entry->node			 = cobs[index].node;
 		rtc = cef_mem_hash_tbl_item_set (trg_key, trg_key_len, entry, &old_entry);
 		if (rtc < 0) {
-			if (entry->msg)
-				free (entry->msg);
-			if (entry->name)
-				free (entry->name);
+			free (entry->msg);
+			free (entry->name);
 			free (entry);
 			return (rtc);
 		}
@@ -591,7 +604,7 @@ mem_content_del (
 	CsmgrT_Stat* rcd = NULL;
 	uint64_t 	i;
 	ConpubdT_Content_Mem_Entry* entry = NULL;
-	unsigned char trg_key[CefC_Conpub_Key_Max];
+	unsigned char trg_key[65535];
 	int 			trg_key_len;
 
 	pthread_mutex_lock (&conpub_mem_cs_mutex);
@@ -602,24 +615,19 @@ mem_content_del (
 		return (-1);
 	}
 	for (i=0; i< cob_num; i++) {
-		trg_key_len = conpubd_name_chunknum_concatenate (name, name_len, (uint32_t)i, trg_key);
-		entry = cef_mem_hash_tbl_item_remove (trg_key, trg_key_len);
-#ifdef CefC_Debug
-char	buff_uri[CefC_NAME_MAXLEN];
-cef_frame_conversion_name_to_uri(trg_key, trg_key_len, buff_uri);
-conpubd_dbg_write (CefC_Dbg_Finer, "%s(%d) %s(key_len=%d), entry=%p.\n", __func__, __LINE__, buff_uri, trg_key_len, entry);
-#endif	// CefC_Debug
-		if (entry) {
-			conpubd_stat_cob_remove (
-				conpub_stat_hdl, entry->name, entry->name_len,
-				entry->chunk_num, entry->pay_len);
-				cobpub_hdl->cache_cobs--;
-			if (entry->msg)
-				free (entry->msg);
-			if (entry->name)
-				free (entry->name);
-			free (entry);
-		}
+		trg_key_len = conpubd_key_create_by_Mem_Entry (name, name_len, (uint32_t)i, trg_key);
+	entry = cef_mem_hash_tbl_item_remove (trg_key, trg_key_len);
+	if (entry == NULL) {
+			pthread_mutex_unlock (&conpub_mem_cs_mutex);
+			return (-1);
+	}
+	conpubd_stat_cob_remove (
+		conpub_stat_hdl, entry->name, entry->name_len,
+		entry->chunk_num, entry->pay_len);
+		cobpub_hdl->cache_cobs--;
+	free (entry->msg);
+	free (entry->name);
+	free (entry);
 	}
 	pthread_mutex_unlock (&conpub_mem_cs_mutex);
 
@@ -863,7 +871,7 @@ cef_mem_hash_tbl_item_get (
 	uint32_t y;
 	CefT_Mem_Hash_Cell* cp;
 
-	if ((klen > CefC_Conpub_Key_Max) || (ht == NULL)) {
+	if ((klen > MemC_Max_KLen) || (ht == NULL)) {
 		return (NULL);
 	}
 	hash = cef_mem_hash_number_create (key, klen);
@@ -895,7 +903,7 @@ cef_mem_hash_tbl_item_remove (
 	CefT_Mem_Hash_Cell* cp;
 	CefT_Mem_Hash_Cell* wcp;
 
-	if ((klen > CefC_Conpub_Key_Max) || (ht == NULL)) {
+	if ((klen > MemC_Max_KLen) || (ht == NULL)) {
 		return (NULL);
 	}
 
@@ -945,4 +953,23 @@ cef_mem_hash_number_create (
 	memcpy (&hash, &out[12], sizeof (uint32_t));
 
 	return (hash);
+}
+/****************************************************************************************/
+int												/* length of the created key 			*/
+conpubd_key_create_by_Mem_Entry (
+	unsigned char*	name,
+	uint16_t		name_len,
+	uint32_t		chunk_num,
+	unsigned char* key
+) {
+
+	memcpy (&key[0], name, name_len);
+	key[name_len] 		= 0x00;
+	key[name_len + 1] 	= 0x10;
+	key[name_len + 2] 	= 0x00;
+	key[name_len + 3] 	= 0x04;
+	chunk_num = htonl (chunk_num);
+	memcpy (&key[name_len + 4], &chunk_num, sizeof (uint32_t));
+
+	return (name_len + 4 + sizeof (uint32_t));
 }
