@@ -802,6 +802,7 @@ cefnetd_handle_create (
 
 	/* Assigns default values to the cefnetd handle 	*/
 	hdl->port_num 		= CefC_Default_PortNum;
+	hdl->local_sock_id[0] = '\0';
 	hdl->fib_max_size 	= CefC_Default_FibSize;
 	hdl->pit_max_size 	= CefC_Default_PitSize;
 	hdl->sk_type 		= CefC_Default_Sktype;
@@ -5943,6 +5944,14 @@ cefnetd_config_read (
 				return (-1);
 			}
 			hdl->pit_max_size = res;
+		} else if (strcmp (pname, CefC_ParamName_LocalSockId) == 0) {
+			if (strlen (ws) > CefC_LOCAL_SOCK_ID_SIZ) {
+				cef_log_write (CefC_Log_Error,
+					"%s must be shorter than %d.\n",
+					CefC_ParamName_LocalSockId, CefC_LOCAL_SOCK_ID_SIZ);
+				return (-1);
+			}
+			strcpy (hdl->local_sock_id, ws);
 		} else if (strcmp (pname, CefC_ParamName_FibSize) == 0) {
 			res = atoi (ws);
 			if (res < 1) {
