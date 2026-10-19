@@ -46,6 +46,7 @@ f_ccn.csact_alg_publickey	= ProtoField.bytes("ccn.csact_alg.publickey", "T_PUBLI
 f_ccn.encrypt_alg_type		= ProtoField.uint16("ccn.encrypt_alg.type", "type", base.DEC)
 f_ccn.encrypt_alg_padding	= ProtoField.uint16("ccn.encrypt_alg.padding", "padding", base.DEC)
 f_ccn.org_keyid				= ProtoField.bytes("ccn.org_keyid", "T_KEYID")
+f_ccn.log_tag				= ProtoField.string("ccn.log_tag", "LOG_TAG")
 
 f_ccn.telemetry				= ProtoField.none("ccn.telemetry", "T_INT")
 f_ccn.availability			= ProtoField.uint16("ccn.availability", "T_INT_AVAILABILITY")
@@ -129,6 +130,19 @@ switch_NictVenderTLV[0x8005] = function(block, root, pInfo)
 
    treeInfo:add(f_ccn.seqnum, blk_val)
    pInfo.cols.info = string.format("%s,SEQNUM", pInfo.cols.info)
+
+   return treeInfo
+end
+--
+-- LOG_TAG
+--
+switch_NictVenderTLV[0x0014] = function(block, root, pInfo)
+   local blk_val = block.tvb(block.offset + block.typeLen + block.lengthLen, block.length)
+   local treeInfo = root:add(block.tvb(block.offset, block.size),
+         string.format("LOG_TAG(0x%x) Length: %d Value: %s", block.type, block.length, blk_val:string()))
+
+   treeInfo:add(f_ccn.log_tag, blk_val)
+   pInfo.cols.info = string.format("%s,LOG_TAG", pInfo.cols.info)
 
    return treeInfo
 end
@@ -2335,7 +2349,7 @@ function getNictOrgBlock(tvb, offset)
    block.offset = offset
 
    block.type,   block.typeLen   = tvb(offset+0, 2):uint(), 2
-   if block.type >= 0x2000 then
+   if block.type >= 0x2000 or block.type == 0x0014 then
      block.length, block.lengthLen = tvb(offset+2, 2):uint(), 2
    else
      block.length, block.lengthLen = 0, 0

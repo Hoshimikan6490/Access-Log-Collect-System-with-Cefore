@@ -16,6 +16,13 @@
 #CEF_LOG_LEVEL=0
 
 #
+# Enable access log tag collection.
+#  0: Disable
+#  1: Enable
+#
+#ENABLE_ACCESS_LOG=0
+
+#
 # Port number used by cefnetd.
 # This value must be higther than 1024 and lower than 65536.
 #

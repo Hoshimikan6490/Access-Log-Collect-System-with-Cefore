@@ -174,6 +174,8 @@ typedef struct {
 
 	/********** Parameters 			***********/
 	uint16_t 			port_num;				/* Port Number							*/
+	char				local_sock_id[CefC_LOCAL_SOCK_ID_SIZ + 1];
+	int				access_log_f;				/* 0:Disable 1:Enable access log		*/
 	uint32_t 			fib_max_size;			/* Maximum FIB entry 					*/
 	uint32_t 			pit_max_size;			/* Maximum PIT entry 					*/
 	int		 			sk_type;				/* Type of socket 						*/

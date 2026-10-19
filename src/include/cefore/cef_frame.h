@@ -175,6 +175,7 @@
 #define CefC_T_FROM_PUB				0x000D		/* Require to get the content from the 	*/
 												/* publisher (a.k.a T_APP_FROM_PUB)		*/
 #define CefC_T_REFLEXIVE_SMI 		0x0013		/* Flag of SMI for Reflexive			*/
+#define CefC_T_LOG_TAG				0x0014		/* Log tag value for forwarded Interest	*/
 
 /*------------------------------------------------------------------*/
 /* CCNx Name Segment Types											*/

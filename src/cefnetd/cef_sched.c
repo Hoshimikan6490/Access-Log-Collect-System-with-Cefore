@@ -60,6 +60,132 @@
 
 /****************************************************************************************
  ****************************************************************************************/
+static int
+cefnetd_interest_add_log_tag (
+	CefT_Netd_Handle* hdl,
+	unsigned char* msg,
+	uint16_t* header_len,
+	uint16_t* payload_len,
+	CefT_CcnMsg_OptHdr* poh
+) {
+	struct fixed_hdr* fix_hdr = (struct fixed_hdr*) msg;
+	struct tlv_hdr* tlv_hdr;
+	const uint16_t pen_len = 3;
+	const unsigned char pen[] = {
+		(CefC_NICT_PEN >> 16) & 0xff,
+		(CefC_NICT_PEN >> 8) & 0xff,
+		CefC_NICT_PEN & 0xff
+	};
+	uint16_t log_tag_len = (uint16_t) strlen (hdl->local_sock_id);
+	uint16_t add_len = CefC_S_TLF + log_tag_len;
+	uint16_t old_torg_len = 0;
+	uint16_t torg_pos = 0;
+	uint16_t log_tag_pos = 0;
+	uint16_t index;
+	uint16_t packet_len;
+	int has_empty_log_tag = 0;
+	int has_own_torg = 0;
+
+  // if LOCAL_SOCK_ID is not set or poh is NULL, return 0
+	if (log_tag_len == 0 || poh == NULL) {
+		return (0);
+	}
+
+  // check if the message has its own T-ORG TLV
+	index = CefC_S_Fix_Header;
+	while (index + CefC_S_TLF <= *header_len) {
+		uint16_t torg_len;
+		tlv_hdr = (struct tlv_hdr*) &msg[index];
+		torg_len = ntohs (tlv_hdr->length);
+		if (torg_len > *header_len - index - CefC_S_TLF) {
+			break;
+		}
+		if (ntohs (tlv_hdr->type) == CefC_T_OPT_ORG
+			&& torg_len >= pen_len
+			&& memcmp (&msg[index + CefC_S_TLF], pen, pen_len) == 0) {
+			torg_pos = index;
+			old_torg_len = torg_len;
+			has_own_torg = 1;
+			break;
+		}
+		index += CefC_S_TLF + torg_len;
+	}
+	if (has_own_torg) {
+		uint16_t org_value_pos = torg_pos + CefC_S_TLF + pen_len;
+		uint16_t org_value_len = old_torg_len - pen_len;
+		index = 0;
+		while (index + CefC_S_TLF <= org_value_len) {
+			uint16_t sub_len;
+			tlv_hdr = (struct tlv_hdr*) &msg[org_value_pos + index];
+			sub_len = ntohs (tlv_hdr->length);
+			if (sub_len > org_value_len - index - CefC_S_TLF) {
+				break;
+			}
+			if (ntohs (tlv_hdr->type) == CefC_T_LOG_TAG) {
+				if (sub_len > 0) {
+					return (0);
+				}
+				log_tag_pos = org_value_pos + index;
+				has_empty_log_tag = 1;
+				break;
+			}
+			index += CefC_S_TLF + sub_len;
+		}
+	}
+
+  // check if the message has enough space to add LOG_TAG TLV
+	packet_len = ntohs (fix_hdr->pkt_len);
+	if (has_own_torg) {
+		uint16_t insert_len = has_empty_log_tag ? log_tag_len : add_len;
+		if (packet_len > CefC_Max_Msg_Size - insert_len
+			|| *header_len > CefC_Max_Header_Size - insert_len) {
+			return (0);
+		}
+	} else {
+		uint16_t new_torg_len = CefC_S_TLF + pen_len + add_len;
+		if (packet_len > CefC_Max_Msg_Size - new_torg_len
+			|| *header_len > CefC_Max_Header_Size - new_torg_len) {
+			return (0);
+		}
+	}
+
+  // add LOG_TAG TLV (without value of Log Tag) to the message
+	if (has_own_torg) {
+		uint16_t insert_len = has_empty_log_tag ? log_tag_len : add_len;
+		uint16_t insert_pos = has_empty_log_tag
+			? log_tag_pos + CefC_S_TLF
+			: torg_pos + CefC_S_TLF + old_torg_len;
+		memmove (&msg[insert_pos + insert_len], &msg[insert_pos], packet_len - insert_pos);
+		tlv_hdr = (struct tlv_hdr*) &msg[torg_pos];
+		tlv_hdr->length = htons (old_torg_len + insert_len);
+		index = has_empty_log_tag ? log_tag_pos : insert_pos;
+	} else {
+		uint16_t insert_pos = *header_len;
+		uint16_t new_torg_len = CefC_S_TLF + pen_len + add_len;
+		memmove (&msg[insert_pos + new_torg_len], &msg[insert_pos], packet_len - insert_pos);
+		tlv_hdr = (struct tlv_hdr*) &msg[insert_pos];
+		tlv_hdr->type = htons (CefC_T_OPT_ORG);
+		tlv_hdr->length = htons (pen_len + add_len);
+		memcpy (&msg[insert_pos + CefC_S_TLF], pen, pen_len);
+		index = insert_pos + CefC_S_TLF + pen_len;
+	}
+
+  // add LOG_TAG TLV (with value of Log Tag) to the message
+	tlv_hdr = (struct tlv_hdr*) &msg[index];
+	tlv_hdr->type = htons (CefC_T_LOG_TAG);
+	tlv_hdr->length = htons (log_tag_len);
+	memcpy (&msg[index + CefC_S_TLF], hdl->local_sock_id, log_tag_len);
+	if (has_own_torg) {
+		*header_len += add_len;
+	} else {
+		uint16_t new_torg_len = CefC_S_TLF + pen_len + add_len;
+		*header_len += new_torg_len;
+	}
+	fix_hdr->hdr_len = (uint8_t) *header_len;
+	fix_hdr->pkt_len = htons (*header_len + *payload_len);
+	return (1);
+}
+
 /*--------------------------------------------------------------------------------------
 	Forwards the specified Interest
 ----------------------------------------------------------------------------------------*/
@@ -105,6 +231,9 @@ cefnetd_interest_forward (
 			return (1);
 		}
 		msg[CefC_O_Fix_HopLimit] = pm->hoplimit;
+	}
+	if (hdl->access_log_f) {
+		cefnetd_interest_add_log_tag (hdl, msg, &header_len, &payload_len, poh);
 	}
 
 	if (hdl->fwd_strtgy_hdl->fwd_int) {
