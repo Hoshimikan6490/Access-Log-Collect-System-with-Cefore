@@ -112,6 +112,7 @@
 #define CefC_ParamName_PitSize			"PIT_SIZE"
 #define CefC_ParamName_FibSize			"FIB_SIZE"
 #define CefC_ParamName_LocalSockId		"LOCAL_SOCK_ID"
+#define CefC_ParamName_EnableAccessLog	"ENABLE_ACCESS_LOG"
 #define CefC_ParamName_PrvKey			"PRIVATE_KEY"
 #define CefC_ParamName_NbrSize			"NBR_SIZE"
 #define CefC_ParamName_NbrMngInterval	"NBR_INTERVAL"

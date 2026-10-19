@@ -232,7 +232,9 @@ cefnetd_interest_forward (
 		}
 		msg[CefC_O_Fix_HopLimit] = pm->hoplimit;
 	}
-	cefnetd_interest_add_log_tag (hdl, msg, &header_len, &payload_len, poh);
+	if (hdl->access_log_f) {
+		cefnetd_interest_add_log_tag (hdl, msg, &header_len, &payload_len, poh);
+	}
 
 	if (hdl->fwd_strtgy_hdl->fwd_int) {
 
