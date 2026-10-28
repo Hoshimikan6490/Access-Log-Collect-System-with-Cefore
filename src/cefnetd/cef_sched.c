@@ -89,8 +89,8 @@ cefnetd_interest_add_log_tag (
 	int has_empty_log_tag = 0;
 	int has_own_torg = 0;
 
-  // if LOCAL_SOCK_ID is not set or poh is NULL, return 0
-	if (log_tag_len == 0 || poh == NULL) {
+  // check if the message has enough space to add LOG_TAG TLV
+	if (log_tag_len == 0 || poh == NULL || pm == NULL) {
 		return (0);
 	}
 
