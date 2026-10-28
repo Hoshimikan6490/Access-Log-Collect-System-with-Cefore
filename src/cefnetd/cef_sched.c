@@ -197,9 +197,6 @@ cefnetd_interest_add_log_tag (
 	if (poh->lifetime_f >= insert_pos) {
 		poh->lifetime_f += insert_len;
 	}
-	if (poh->cachetime_f >= insert_pos) {
-		poh->cachetime_f += insert_len;
-	}
 	if (poh->MsgHash_f >= insert_pos) {
 		poh->MsgHash_f += insert_len;
 	}
