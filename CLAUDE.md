@@ -8,26 +8,7 @@ A fork of NICT's [Cefore](https://github.com/cefore/cefore) 0.12.x (CCNx-1.0 / R
 
 ## Build
 
-Linux/macOS only (POSIX sockets, autotools). It does not build natively on Windows; use a Linux machine/VM.
-
-```sh
-autoconf && automake
-./configure --enable-cache --enable-debug   # also: --enable-csmgr, --with-openssl-dir=...
-make
-sudo make install && sudo ldconfig
-```
-
-- [build.sh](build.sh) does dependency install + the above with `--enable-cache --enable-debug`.
-- [cleanup.sh](cleanup.sh) stops daemons, removes installed binaries/libs under `$CEFORE_DIR` (default `/usr/local`), clears `/tmp/cef_*` sockets and runs `make distclean`. It keeps `$CEFORE_DIR/cefore/*.conf`.
-- `make install` only copies config files (e.g. `cefnetd.conf`, `log_tag.yaml`) into `$CEFORE_DIR/cefore/` if they don't already exist, so changes to `*.def` templates won't overwrite an installed config.
-- Generated `Makefile.in` files are committed. When editing a `Makefile.am`, update the matching `Makefile.in` too (or regenerate with automake).
-
-There is no automated test suite.
-
-## Build and verification
-
-- The user performs builds and runtime tests. Review whether code follows the language's syntax and formatting rules, and reason through the processing logic to assess whether it is theoretically correct.
-- Runtime checks may include `cefnetdstart`, `cefstatus`, and tools like `cefputfile` / `cefgetfile` between nodes; the user runs them.
+Do not build or test the project, as the user is responsible for all build and testing activities.
 
 ## Shell and file operations
 
