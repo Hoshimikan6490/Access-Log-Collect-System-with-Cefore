@@ -213,7 +213,7 @@ cefnetd_interest_add_log_tag (
 	tlv_hdr->length = htons (log_tag_len);
 	memcpy (&msg[index + CefC_S_TLF], hdl->local_sock_id, log_tag_len);
 	if (has_own_torg) {
-		*header_len += add_len;
+		*header_len += insert_len;
 	} else {
 		uint16_t new_torg_len = CefC_S_TLF + pen_len + add_len;
 		*header_len += new_torg_len;
