@@ -1,0 +1,5 @@
+# Producer LOG_TAG forwarding settings by Contents Name.
+# Set producer to true to copy the Interest LOG_TAG into the Data packet.
+contents:
+  - name: "ccnx:/example/content"
+    producer: false

@@ -3896,6 +3896,15 @@ cef_frame_opheader_user_tlv_parse (
 						index += (CefC_S_TLF + ts_len);
 						break;
 					}
+					case CefC_T_LOG_TAG:
+						poh->log_tag_len = ntohs (thdr->length);
+						if (poh->log_tag_len > sizeof (poh->log_tag)) {
+							poh->log_tag_len = sizeof (poh->log_tag);
+						}
+						memcpy (poh->log_tag, &wp[CefC_S_TLF], poh->log_tag_len);
+						wp += CefC_S_TLF + ntohs(thdr->length);
+						index += CefC_S_TLF + ntohs(thdr->length);
+						break;
 					default:
 #ifdef	__JK_TEST_CODE__
 			printf( "[%s] CefC_T_OPT_ORG  default\n",

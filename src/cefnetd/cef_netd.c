@@ -539,7 +539,17 @@ cefnetd_FHR_Reply_process(
 static	int
 cefnetd_ccninfo_loop_check(
 	CefT_Netd_Handle* hdl,					/* cefnetd handle							*/
-	CefT_Parsed_Ccninfo* pci
+CefT_Parsed_Ccninfo* pci
+);
+
+static void
+cefnetd_log_tag_config_read (
+	CefT_Netd_Handle* hdl
+);
+static int
+cefnetd_log_tag_is_enabled (
+	CefT_Netd_Handle* hdl,
+	CefT_CcnMsg_MsgBdy* pm
 );
 
 /*--------------------------------------------------------------------------------------
@@ -803,6 +813,7 @@ cefnetd_handle_create (
 	/* Assigns default values to the cefnetd handle 	*/
 	hdl->port_num 		= CefC_Default_PortNum;
 	hdl->local_sock_id[0] = '\0';
+	hdl->log_tag_name[0] = '\0';
 	hdl->access_log_f		= 0;
 	hdl->fib_max_size 	= CefC_Default_FibSize;
 	hdl->pit_max_size 	= CefC_Default_PitSize;
@@ -1199,6 +1210,11 @@ cefnetd_handle_create (
 			memcpy( &hdl->My_Node_Name_TLV[CefC_S_TLF], out_name_tlv, res );
 		}
 		cef_log_write (CefC_Log_Warn, "No NODE_NAME defined in cefnetd.conf; IP address is temporarily used as the node name.\n");
+	}
+
+	/* If LOG_TAG_NAME is not specified, NODE_NAME (or IP address) is used */
+	if ( hdl->log_tag_name[0] == '\0' && hdl->My_Node_Name != NULL ) {
+		snprintf( hdl->log_tag_name, sizeof (hdl->log_tag_name), "%s", hdl->My_Node_Name );
 	}
 
 	hdl->app_rsp_msg = calloc(10, CefC_Max_Length);
@@ -4517,6 +4533,19 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 	/*--------------------------------------------------------------------
 		Forwards the Content Object
 	----------------------------------------------------------------------*/
+	if (obj_sender_type == CefC_OBJ_Sender_Type_Neighbor &&
+		cefnetd_log_tag_is_enabled (hdl, &pm)) {
+		for (pe_seq = 0; pe_seq < CefC_PIT_SEARCH_TYPE_NUM; pe_seq++) {
+			if (pe[pe_seq] != NULL && pe[pe_seq]->log_tag_len > 0) {
+				cefnetd_packet_add_log_tag (msg, &header_len, &payload_len,
+					pe[pe_seq]->log_tag, pe[pe_seq]->log_tag_len);
+				break;
+			}
+		}
+	}
+	/* Cache response LOG_TAG propagation is intentionally deferred. */
+	/* if (obj_sender_type == CefC_OBJ_Sender_Type_Csmgr ||
+		obj_sender_type == CefC_OBJ_Sender_Type_Localcache) { ... } */
 	if (tp_plugin_res & CefC_Pi_Object_Send) {
 		if (face_num > 0) {
 #ifdef CefC_Debug
@@ -5886,6 +5915,95 @@ cefnetd_incoming_csmgr_ccninforeq_process (
 	return (1);
 }
 #endif // CefC_IsEnable_ContentStore
+static void
+cefnetd_log_tag_config_read (
+	CefT_Netd_Handle* hdl
+) {
+	char config_dir[CefC_BufSiz_1KB];
+	char path[CefC_BufSiz_1KB];
+	char line[CefC_BufSiz_1KB];
+	char* value;
+	char* end;
+	char quote;
+	int current = -1;
+	FILE* fp;
+
+	cef_client_config_dir_get (config_dir);
+	snprintf (path, sizeof (path), "%s/log_tag.yaml", config_dir);
+	fp = fopen (path, "r");
+	if (fp == NULL) {
+		return;
+	}
+
+	while (fgets (line, sizeof (line), fp) != NULL) {
+		value = line;
+		while (*value == ' ' || *value == '\t') {
+			value++;
+		}
+		if (*value == '#' || *value == '\0' || *value == '\n') {
+			continue;
+		}
+
+		if (strncmp (value, "- name:", 7) == 0 || strncmp (value, "name:", 5) == 0) {
+			if (hdl->log_tag_content_num >= CefC_LogTag_Content_Max) {
+				continue;
+			}
+			value = strchr (value, ':') + 1;
+			while (*value == ' ' || *value == '\t') {
+				value++;
+			}
+			end = value + strlen (value);
+			while (end > value && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ' || end[-1] == '\t')) {
+				end--;
+			}
+			*end = '\0';
+			if (*value == '"' || *value == '\'') {
+				quote = *value;
+				value++;
+				end = strrchr (value, quote);
+				if (end != NULL) {
+					*end = '\0';
+				}
+			}
+			strncpy (hdl->log_tag_contents[hdl->log_tag_content_num].name,
+				value, CefC_NAME_BUFSIZ - 1);
+			hdl->log_tag_contents[hdl->log_tag_content_num].enabled = 0;
+			current = hdl->log_tag_content_num++;
+		} else if (current >= 0 && strncmp (value, "producer:", 9) == 0) {
+			value += 9;
+			while (*value == ' ' || *value == '\t') {
+				value++;
+			}
+			end = value + strlen (value);
+			while (end > value && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ' || end[-1] == '\t')) {
+				end--;
+			}
+			*end = '\0';
+			hdl->log_tag_contents[current].enabled =
+				(strcasecmp (value, "true") == 0 || strcmp (value, "1") == 0);
+		}
+	}
+	fclose (fp);
+}
+
+static int
+cefnetd_log_tag_is_enabled (
+	CefT_Netd_Handle* hdl,
+	CefT_CcnMsg_MsgBdy* pm
+) {
+	char uri[CefC_NAME_BUFSIZ];
+	uint16_t i;
+
+	cefnetd_name_to_uri (pm, uri, sizeof (uri));
+	for (i = 0; i < hdl->log_tag_content_num; i++) {
+		if (hdl->log_tag_contents[i].enabled &&
+			strcmp (hdl->log_tag_contents[i].name, uri) == 0) {
+			return (1);
+		}
+	}
+	return (0);
+}
+
 /*--------------------------------------------------------------------------------------
 	Reads the config file
 ----------------------------------------------------------------------------------------*/
@@ -5962,6 +6080,23 @@ cefnetd_config_read (
 				return (-1);
 			}
 			strcpy (hdl->local_sock_id, ws);
+		} else if (strcmp (pname, CefC_ParamName_LogTagName) == 0) {
+			char* value = ws;
+			size_t len = strlen (value);
+			/* Strips the surrounding quotes ("" means not specified) */
+			if (len >= 2 && (value[0] == '"' || value[0] == '\'')
+				&& value[len - 1] == value[0]) {
+				value[len - 1] = '\0';
+				value++;
+				len -= 2;
+			}
+			if (len >= sizeof (hdl->log_tag_name)) {
+				cef_log_write (CefC_Log_Error,
+					"%s must be shorter than %zu.\n",
+					CefC_ParamName_LogTagName, sizeof (hdl->log_tag_name));
+				return (-1);
+			}
+			strcpy (hdl->log_tag_name, value);
 		} else if (strcmp (pname, CefC_ParamName_FibSize) == 0) {
 			res = atoi (ws);
 			if (res < 1) {
@@ -6351,6 +6486,7 @@ cefnetd_config_read (
 		}
 	}
 	fclose (fp);
+	cefnetd_log_tag_config_read (hdl);
 
 	//202108
 	if ( hdl->IR_Option ) {

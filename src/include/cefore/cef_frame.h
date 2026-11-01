@@ -698,6 +698,8 @@ typedef struct _CefT_CcnMsg_OptHdr_t {
 	int				tx_prio;			/* priority		*/
 	int				tx_copies;			/* copies		*/
 	int				tx_routes;			/* routes		*/
+	uint16_t		log_tag_len;
+	uchar_t			log_tag[CefC_Max_Header_Size];
 
 } CefT_CcnMsg_OptHdr;
 #define CeforeLifetime(op,n) {(op)->lifetime_f=1; (op)->lifetime=(n);}

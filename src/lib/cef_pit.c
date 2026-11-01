@@ -371,6 +371,11 @@ cef_pit_entry_lookup_with_lock (
 		entry->hashv = cef_lhash_tbl_hashv_get (pit, entry->key, entry->klen);
 		entry->clean_us = cef_client_present_timeus_get () + CefC_Pit_CleaningTime;
 		entry->tp_variant = poh->org.tp_variant;
+		entry->log_tag_len = poh->log_tag_len;
+		if (entry->log_tag_len > sizeof (entry->log_tag)) {
+			entry->log_tag_len = sizeof (entry->log_tag);
+		}
+		memcpy (entry->log_tag, poh->log_tag, entry->log_tag_len);
 		entry->adv_lifetime_us = 0;
 		entry->drp_lifetime_us = 0;
 #ifdef REFLEXIVE_FORWARDING

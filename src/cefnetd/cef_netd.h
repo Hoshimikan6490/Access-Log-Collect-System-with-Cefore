@@ -89,6 +89,20 @@
 #define	CefC_IsEnable_ContentStore	FALSE
 #endif
 
+#define CefC_LogTag_Content_Max	128
+
+typedef struct {
+	char	name[CefC_NAME_BUFSIZ];
+	uint8_t enabled;
+} CefT_LogTag_Content_Config;
+
+int cefnetd_packet_add_log_tag (
+	unsigned char* msg,
+	uint16_t* header_len,
+	uint16_t* payload_len,
+	const unsigned char* log_tag,
+	uint16_t log_tag_len
+);
 /*------------------------------------------------------------------*/
 /* Commands to control cefnetd										*/
 /*------------------------------------------------------------------*/
@@ -175,7 +189,10 @@ typedef struct {
 	/********** Parameters 			***********/
 	uint16_t 			port_num;				/* Port Number							*/
 	char				local_sock_id[CefC_LOCAL_SOCK_ID_SIZ + 1];
+	char				log_tag_name[CefC_NAME_BUFSIZ];
 	int				access_log_f;				/* 0:Disable 1:Enable access log		*/
+	uint16_t		log_tag_content_num;  /* Count of log tag contents */
+	CefT_LogTag_Content_Config log_tag_contents[CefC_LogTag_Content_Max]; /* Log tag contents */
 	uint32_t 			fib_max_size;			/* Maximum FIB entry 					*/
 	uint32_t 			pit_max_size;			/* Maximum PIT entry 					*/
 	int		 			sk_type;				/* Type of socket 						*/

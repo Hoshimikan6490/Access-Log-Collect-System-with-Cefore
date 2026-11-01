@@ -60,13 +60,13 @@
 
 /****************************************************************************************
  ****************************************************************************************/
-static int
-cefnetd_interest_add_log_tag (
-	CefT_Netd_Handle* hdl,
+int
+cefnetd_packet_add_log_tag (
 	unsigned char* msg,
 	uint16_t* header_len,
 	uint16_t* payload_len,
-	CefT_CcnMsg_OptHdr* poh
+	const unsigned char* log_tag,
+	uint16_t log_tag_len
 ) {
 	struct fixed_hdr* fix_hdr = (struct fixed_hdr*) msg;
 	struct tlv_hdr* tlv_hdr;
@@ -76,7 +76,6 @@ cefnetd_interest_add_log_tag (
 		(CefC_NICT_PEN >> 8) & 0xff,
 		CefC_NICT_PEN & 0xff
 	};
-	uint16_t log_tag_len = (uint16_t) strlen (hdl->local_sock_id);
 	uint16_t add_len = CefC_S_TLF + log_tag_len;
 	uint16_t old_torg_len = 0;
 	uint16_t torg_pos = 0;
@@ -86,8 +85,8 @@ cefnetd_interest_add_log_tag (
 	int has_empty_log_tag = 0;
 	int has_own_torg = 0;
 
-  // if LOCAL_SOCK_ID is not set or poh is NULL, return 0
-	if (log_tag_len == 0 || poh == NULL) {
+  // if log tag is empty or NULL, return 0
+	if (log_tag_len == 0 || log_tag == NULL) {
 		return (0);
 	}
 
@@ -174,9 +173,9 @@ cefnetd_interest_add_log_tag (
 	tlv_hdr = (struct tlv_hdr*) &msg[index];
 	tlv_hdr->type = htons (CefC_T_LOG_TAG);
 	tlv_hdr->length = htons (log_tag_len);
-	memcpy (&msg[index + CefC_S_TLF], hdl->local_sock_id, log_tag_len);
+	memcpy (&msg[index + CefC_S_TLF], log_tag, log_tag_len);
 	if (has_own_torg) {
-		*header_len += add_len;
+		*header_len += has_empty_log_tag ? log_tag_len : add_len;
 	} else {
 		uint16_t new_torg_len = CefC_S_TLF + pen_len + add_len;
 		*header_len += new_torg_len;
@@ -233,7 +232,9 @@ cefnetd_interest_forward (
 		msg[CefC_O_Fix_HopLimit] = pm->hoplimit;
 	}
 	if (hdl->access_log_f) {
-		cefnetd_interest_add_log_tag (hdl, msg, &header_len, &payload_len, poh);
+		cefnetd_packet_add_log_tag (msg, &header_len, &payload_len,
+			(unsigned char*) hdl->log_tag_name,
+			(uint16_t) strlen (hdl->log_tag_name));
 	}
 
 	if (hdl->fwd_strtgy_hdl->fwd_int) {
