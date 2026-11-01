@@ -82,6 +82,8 @@ cefnetd_packet_add_log_tag (
 	uint16_t log_tag_pos = 0;
 	uint16_t index;
 	uint16_t packet_len;
+	uint16_t insert_pos;
+	uint16_t insert_len;
 	int has_empty_log_tag = 0;
 	int has_own_torg = 0;
 
@@ -150,8 +152,8 @@ cefnetd_packet_add_log_tag (
 
   // add LOG_TAG TLV (without value of Log Tag) to the message
 	if (has_own_torg) {
-		uint16_t insert_len = has_empty_log_tag ? log_tag_len : add_len;
-		uint16_t insert_pos = has_empty_log_tag
+		insert_len = has_empty_log_tag ? log_tag_len : add_len;
+		insert_pos = has_empty_log_tag
 			? log_tag_pos + CefC_S_TLF
 			: torg_pos + CefC_S_TLF + old_torg_len;
 		memmove (&msg[insert_pos + insert_len], &msg[insert_pos], packet_len - insert_pos);
@@ -159,14 +161,48 @@ cefnetd_packet_add_log_tag (
 		tlv_hdr->length = htons (old_torg_len + insert_len);
 		index = has_empty_log_tag ? log_tag_pos : insert_pos;
 	} else {
-		uint16_t insert_pos = *header_len;
+		insert_pos = *header_len;
 		uint16_t new_torg_len = CefC_S_TLF + pen_len + add_len;
+		insert_len = new_torg_len;
 		memmove (&msg[insert_pos + new_torg_len], &msg[insert_pos], packet_len - insert_pos);
 		tlv_hdr = (struct tlv_hdr*) &msg[insert_pos];
 		tlv_hdr->type = htons (CefC_T_OPT_ORG);
 		tlv_hdr->length = htons (pen_len + add_len);
 		memcpy (&msg[insert_pos + CefC_S_TLF], pen, pen_len);
 		index = insert_pos + CefC_S_TLF + pen_len;
+	}
+	/*
+	 * Parsed values (such as pm->name) are stored in arrays within pm/poh, not
+	 * as pointers into msg.  The *_f fields that are packet offsets must still
+	 * follow the moved bytes.  In particular, the PIT uses lifetime_f to update
+	 * msg later.
+	 */
+	if (pm->name_f >= insert_pos) {
+		pm->name_f += insert_len;
+	}
+	if (pm->end_chunk_num_f >= insert_pos) {
+		pm->end_chunk_num_f += insert_len;
+	}
+	if (pm->payload_f >= insert_pos) {
+		pm->payload_f += insert_len;
+	}
+	if (pm->KeyIdRestr_f >= insert_pos) {
+		pm->KeyIdRestr_f += insert_len;
+	}
+	if (pm->ObjHashRestr_f >= insert_pos) {
+		pm->ObjHashRestr_f += insert_len;
+	}
+	if (poh->lifetime_f >= insert_pos) {
+		poh->lifetime_f += insert_len;
+	}
+	if (poh->MsgHash_f >= insert_pos) {
+		poh->MsgHash_f += insert_len;
+	}
+	if (poh->skip_hop_offset >= insert_pos) {
+		poh->skip_hop_offset += insert_len;
+	}
+	if (poh->rpt_block_offset >= insert_pos) {
+		poh->rpt_block_offset += insert_len;
 	}
 
   // add LOG_TAG TLV (with value of Log Tag) to the message
