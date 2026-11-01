@@ -4533,7 +4533,7 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 	/*--------------------------------------------------------------------
 		Forwards the Content Object
 	----------------------------------------------------------------------*/
-	if (obj_sender_type == CefC_OBJ_Sender_Type_Neighbor &&
+	if (hdl->access_log_f && obj_sender_type == CefC_OBJ_Sender_Type_Neighbor &&
 		cefnetd_log_tag_is_enabled (hdl, &pm)) {
 		for (pe_seq = 0; pe_seq < CefC_PIT_SEARCH_TYPE_NUM; pe_seq++) {
 			if (pe[pe_seq] != NULL && pe[pe_seq]->log_tag_len > 0) {
@@ -5994,7 +5994,16 @@ cefnetd_log_tag_is_enabled (
 	char uri[CefC_NAME_BUFSIZ];
 	uint16_t i;
 
-	cefnetd_name_to_uri (pm, uri, sizeof (uri));
+	for (i = 0; i < hdl->log_tag_content_num; i++) {
+		if (hdl->log_tag_contents[i].enabled) {
+			break;
+		}
+	}
+	if (i == hdl->log_tag_content_num) {
+		return (0);
+	}
+
+	cef_frame_conversion_name_to_uri_without_chunknum (pm->name, pm->name_len, uri);
 	for (i = 0; i < hdl->log_tag_content_num; i++) {
 		if (hdl->log_tag_contents[i].enabled &&
 			strcmp (hdl->log_tag_contents[i].name, uri) == 0) {
