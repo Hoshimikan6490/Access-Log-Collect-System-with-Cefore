@@ -112,7 +112,7 @@ typedef struct {
 											/*  greater than 0: Trigger message 		*/
 #endif // REFLEXIVE_FORWARDING
 	uint16_t			log_tag_len;
-	unsigned char		log_tag[CefC_Max_Header_Size];
+	unsigned char		log_tag[CefC_Max_Log_Tag_Size];
 	CefT_Down_Faces		dnfaces;			/* Down Stream Face entries 				*/
 	unsigned int 		dnfacenum;			/* Number of Down Stream Face entries 		*/
 	CefT_Up_Faces		upfaces;			/* Up Stream Face entry		 				*/

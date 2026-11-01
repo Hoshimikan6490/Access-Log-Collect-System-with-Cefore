@@ -1215,6 +1215,12 @@ cefnetd_handle_create (
 	/* If LOG_TAG_NAME is not specified, NODE_NAME (or IP address) is used */
 	if ( hdl->log_tag_name[0] == '\0' && hdl->My_Node_Name != NULL ) {
 		snprintf( hdl->log_tag_name, sizeof (hdl->log_tag_name), "%s", hdl->My_Node_Name );
+		if ( strlen( hdl->My_Node_Name ) > CefC_Max_Log_Tag_Size ) {
+			cef_log_write (CefC_Log_Warn,
+				"NODE_NAME is longer than %d bytes, so the Log Tag is truncated to \"%s\". "
+				"Specify %s in cefnetd.conf to set it explicitly.\n",
+				CefC_Max_Log_Tag_Size, hdl->log_tag_name, CefC_ParamName_LogTagName);
+		}
 	}
 
 	hdl->app_rsp_msg = calloc(10, CefC_Max_Length);
@@ -6099,10 +6105,10 @@ cefnetd_config_read (
 				value++;
 				len -= 2;
 			}
-			if (len >= sizeof (hdl->log_tag_name)) {
+			if (len > CefC_Max_Log_Tag_Size) {
 				cef_log_write (CefC_Log_Error,
-					"%s must be shorter than %zu.\n",
-					CefC_ParamName_LogTagName, sizeof (hdl->log_tag_name));
+					"%s must be at most %d bytes.\n",
+					CefC_ParamName_LogTagName, CefC_Max_Log_Tag_Size);
 				return (-1);
 			}
 			strcpy (hdl->log_tag_name, value);

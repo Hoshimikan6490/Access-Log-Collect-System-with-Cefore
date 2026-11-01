@@ -267,6 +267,7 @@ typedef	enum	{
 
 /* Expand non-displayable characters into hexadecimal strings, so double CefC_NAME_MAXLEN */
 #define	CefC_NAME_BUFSIZ	(CefC_NAME_MAXLEN*2)
+#define	CefC_Max_Log_Tag_Size	20	/* Maximum Log Tag value size in bytes */
 
 /* Both the segment length and overall length of the name have the same upper limit. */
 #ifdef	SHA256_DIGEST_LENGTH

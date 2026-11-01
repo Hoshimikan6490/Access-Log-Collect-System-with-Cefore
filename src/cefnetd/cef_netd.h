@@ -191,7 +191,7 @@ typedef struct {
 	/********** Parameters 			***********/
 	uint16_t 			port_num;				/* Port Number							*/
 	char				local_sock_id[CefC_LOCAL_SOCK_ID_SIZ + 1];
-	char				log_tag_name[CefC_NAME_BUFSIZ];
+	char				log_tag_name[CefC_Max_Log_Tag_Size + 1];
 	int				access_log_f;				/* 0:Disable 1:Enable access log		*/
 	uint16_t		log_tag_content_num;  /* Count of log tag contents */
 	CefT_LogTag_Content_Config log_tag_contents[CefC_LogTag_Content_Max]; /* Log tag contents */
