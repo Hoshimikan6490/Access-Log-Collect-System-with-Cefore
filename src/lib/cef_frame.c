@@ -717,6 +717,9 @@ cef_frame_message_parse (
 	wmp = smp;
 	emp = smp + opthdr_len;
 
+	/* poh may be reused by the caller, so drop a Log Tag left by a previous message */
+	poh->log_tag_len = 0;
+
 	while (wmp < emp) {
 		thdr = (struct tlv_hdr*) &wmp[CefC_O_Type];
 		int	tlv_type = ntohs (thdr->type);
@@ -3896,15 +3899,23 @@ cef_frame_opheader_user_tlv_parse (
 						index += (CefC_S_TLF + ts_len);
 						break;
 					}
-					case CefC_T_LOG_TAG:
-						poh->log_tag_len = ntohs (thdr->length);
+					case CefC_T_LOG_TAG: {
+						uint16_t tag_len = ntohs (thdr->length);
+						if ((size_t) (ewp - wp) < (size_t) CefC_S_TLF + tag_len) {
+							/* Malformed: the value exceeds the remaining T_ORG bytes */
+							poh->log_tag_len = 0;
+							wp = ewp;
+							break;
+						}
+						poh->log_tag_len = tag_len;
 						if (poh->log_tag_len > sizeof (poh->log_tag)) {
 							poh->log_tag_len = sizeof (poh->log_tag);
 						}
 						memcpy (poh->log_tag, &wp[CefC_S_TLF], poh->log_tag_len);
-						wp += CefC_S_TLF + ntohs(thdr->length);
-						index += CefC_S_TLF + ntohs(thdr->length);
+						wp += CefC_S_TLF + tag_len;
+						index += CefC_S_TLF + tag_len;
 						break;
+					}
 					default:
 #ifdef	__JK_TEST_CODE__
 			printf( "[%s] CefC_T_OPT_ORG  default\n",
