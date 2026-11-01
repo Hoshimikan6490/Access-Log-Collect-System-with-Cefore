@@ -65,6 +65,8 @@ cefnetd_packet_add_log_tag (
 	unsigned char* msg,
 	uint16_t* header_len,
 	uint16_t* payload_len,
+  CefT_CcnMsg_MsgBdy* pm,
+	CefT_CcnMsg_OptHdr* poh,
 	const unsigned char* log_tag,
 	uint16_t log_tag_len
 ) {
@@ -268,7 +270,7 @@ cefnetd_interest_forward (
 		msg[CefC_O_Fix_HopLimit] = pm->hoplimit;
 	}
 	if (hdl->access_log_f) {
-		cefnetd_packet_add_log_tag (msg, &header_len, &payload_len,
+		cefnetd_packet_add_log_tag (msg, &header_len, &payload_len, pm, poh,
 			(unsigned char*) hdl->log_tag_name,
 			(uint16_t) strlen (hdl->log_tag_name));
 	}

@@ -4537,7 +4537,7 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 		cefnetd_log_tag_is_enabled (hdl, &pm)) {
 		for (pe_seq = 0; pe_seq < CefC_PIT_SEARCH_TYPE_NUM; pe_seq++) {
 			if (pe[pe_seq] != NULL && pe[pe_seq]->log_tag_len > 0) {
-				cefnetd_packet_add_log_tag (msg, &header_len, &payload_len,
+				cefnetd_packet_add_log_tag (msg, &header_len, &payload_len, &pm, &poh,
 					pe[pe_seq]->log_tag, pe[pe_seq]->log_tag_len);
 				break;
 			}
