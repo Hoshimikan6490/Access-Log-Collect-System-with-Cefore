@@ -38,7 +38,7 @@ default all: $(CEF_CONF)
 
 log_tag.yaml: log_tag.yaml.def
 	@if [ -f $(@:=.def) ]; then \
-		cat $(@:=.def) >> $@; \
+		cat $(@:=.def) > $@; \
 		chmod 644 $@; \
 	else \
 		echo "*** You may need to rerun ./configure in the src directory." >&2; \
