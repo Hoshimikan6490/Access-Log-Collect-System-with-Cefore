@@ -5947,6 +5947,7 @@ cefnetd_log_tag_config_read (
 	char* end;
 	char quote;
 	int current = -1;
+	int limit_warned = 0;
 	FILE* fp;
 
 	cef_client_config_dir_get (config_dir);
@@ -5967,6 +5968,14 @@ cefnetd_log_tag_config_read (
 
 		if (strncmp (value, "- name:", 7) == 0 || strncmp (value, "name:", 5) == 0) {
 			if (hdl->log_tag_content_num >= CefC_LogTag_Content_Max) {
+				if (!limit_warned) {
+					cef_log_write (CefC_Log_Warn,
+						"log_tag.yaml has more than %d entries; the remaining entries are ignored.\n",
+						CefC_LogTag_Content_Max);
+					limit_warned = 1;
+				}
+				/* Detach from the previous entry so that its producer: line is not applied to it */
+				current = -1;
 				continue;
 			}
 			value = strchr (value, ':') + 1;
