@@ -5998,6 +5998,17 @@ cefnetd_log_tag_config_read (
 			strncpy (hdl->log_tag_contents[hdl->log_tag_content_num].name,
 				value, CefC_NAME_BUFSIZ - 1);
 			hdl->log_tag_contents[hdl->log_tag_content_num].enabled = 0;
+			hdl->log_tag_contents[hdl->log_tag_content_num].wildcard = 0;
+			hdl->log_tag_contents[hdl->log_tag_content_num].name_len =
+				(uint16_t) strlen (hdl->log_tag_contents[hdl->log_tag_content_num].name);
+			/* "ccnx:/a/b/*" matches every name under "ccnx:/a/b/" */
+			if (hdl->log_tag_contents[hdl->log_tag_content_num].name_len >= 2 &&
+				strcmp (&hdl->log_tag_contents[hdl->log_tag_content_num].name[
+					hdl->log_tag_contents[hdl->log_tag_content_num].name_len - 2], "/*") == 0) {
+				hdl->log_tag_contents[hdl->log_tag_content_num].name[
+					--hdl->log_tag_contents[hdl->log_tag_content_num].name_len] = '\0';
+				hdl->log_tag_contents[hdl->log_tag_content_num].wildcard = 1;
+			}
 			current = hdl->log_tag_content_num++;
 		} else if (current >= 0 && strncmp (value, "producer:", 9) == 0) {
 			value += 9;
@@ -6035,8 +6046,16 @@ cefnetd_log_tag_is_enabled (
 
 	cef_frame_conversion_name_to_uri_without_chunknum (pm->name, pm->name_len, uri);
 	for (i = 0; i < hdl->log_tag_content_num; i++) {
-		if (hdl->log_tag_contents[i].enabled &&
-			strcmp (hdl->log_tag_contents[i].name, uri) == 0) {
+		if (!hdl->log_tag_contents[i].enabled) {
+			continue;
+		}
+		if (hdl->log_tag_contents[i].wildcard) {
+			/* name keeps the trailing "/", so the match is on a name component boundary */
+			if (strncmp (hdl->log_tag_contents[i].name, uri,
+					hdl->log_tag_contents[i].name_len) == 0) {
+				return (1);
+			}
+		} else if (strcmp (hdl->log_tag_contents[i].name, uri) == 0) {
 			return (1);
 		}
 	}

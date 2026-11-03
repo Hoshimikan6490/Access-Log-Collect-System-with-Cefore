@@ -94,6 +94,8 @@
 typedef struct {
 	char	name[CefC_NAME_BUFSIZ];
 	uint8_t enabled;
+	uint8_t wildcard;		/* 1: name ends with "/*" and is matched as a prefix (name keeps the trailing "/") */
+	uint16_t name_len;		/* strlen (name), precomputed at config read */
 } CefT_LogTag_Content_Config;
 
 /* Builds the tagged packet in new_msg (CefC_Max_Msg_Size bytes) without modifying msg.	*/
