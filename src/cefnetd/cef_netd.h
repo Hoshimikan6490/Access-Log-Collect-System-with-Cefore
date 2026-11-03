@@ -106,8 +106,6 @@ int cefnetd_packet_add_log_tag (
 	unsigned char* new_msg,
 	uint16_t* header_len,
 	uint16_t* payload_len,
-  CefT_CcnMsg_MsgBdy* pm,
-	CefT_CcnMsg_OptHdr* poh,
 	const unsigned char* log_tag,
 	uint16_t log_tag_len,
 	int overwrite

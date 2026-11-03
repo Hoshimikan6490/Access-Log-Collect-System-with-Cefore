@@ -48,20 +48,6 @@
  Structures Declaration
  ****************************************************************************************/
 
-/* Packet offsets held in the parsed message / option header */
-typedef struct {
-	uint16_t name_f;
-	uint16_t end_chunk_num_f;
-	uint16_t payload_f;
-	uint16_t KeyIdRestr_f;
-	uint16_t ObjHashRestr_f;
-	uint16_t lifetime_f;
-	uint16_t cachetime_f;
-	uint16_t MsgHash_f;
-	uint16_t skip_hop_offset;
-	uint16_t rpt_block_offset;
-} CefT_ParsedOffsets;
-
 /****************************************************************************************
  State Variables
  ****************************************************************************************/
@@ -71,17 +57,15 @@ typedef struct {
  Static Function Declaration
  ****************************************************************************************/
 
-static void
-cefnetd_parsed_offsets_save (
-	CefT_ParsedOffsets* off,
-	const CefT_CcnMsg_MsgBdy* pm,
-	const CefT_CcnMsg_OptHdr* poh
-);
-static void
-cefnetd_parsed_offsets_restore (
-	const CefT_ParsedOffsets* off,
+static int
+cefnetd_packet_reparse (
+	unsigned char* msg,
+	uint16_t payload_len,
+	uint16_t header_len,
+	const CefT_CcnMsg_OptHdr* src_poh,
+	CefT_CcnMsg_OptHdr* poh,
 	CefT_CcnMsg_MsgBdy* pm,
-	CefT_CcnMsg_OptHdr* poh
+	int target_type
 );
 static void
 cefnetd_interest_forward_core (
@@ -98,40 +82,29 @@ cefnetd_interest_forward_core (
 	CefT_Fib_Entry* fe
 );
 
-static void
-cefnetd_parsed_offsets_save (
-	CefT_ParsedOffsets* off,
-	const CefT_CcnMsg_MsgBdy* pm,
-	const CefT_CcnMsg_OptHdr* poh
+/*
+ * Parses the tagged packet into poh/pm, which the caller zero-initializes.
+ * Every offset (name_f, lifetime_f, ...) is then taken from new_msg by the parser, so
+ * no list of offset fields has to be maintained here.  The caller's own pm/poh
+ * (which describe the original msg) are left untouched.
+ * The message hash does not depend on the header, so it is copied from src_poh
+ * instead of being calculated again.
+ */
+static int										/* Returns a negative value if it fails 	*/
+cefnetd_packet_reparse (
+	unsigned char* msg,						/* tagged message							*/
+	uint16_t payload_len,
+	uint16_t header_len,
+	const CefT_CcnMsg_OptHdr* src_poh,		/* Parsed Option Header of the original		*/
+	CefT_CcnMsg_OptHdr* poh,				/* [out] Parsed Option Header of msg		*/
+	CefT_CcnMsg_MsgBdy* pm,					/* [out] Parsed message of msg				*/
+	int target_type
 ) {
-	off->name_f           = pm->name_f;
-	off->end_chunk_num_f  = pm->end_chunk_num_f;
-	off->payload_f        = pm->payload_f;
-	off->KeyIdRestr_f     = pm->KeyIdRestr_f;
-	off->ObjHashRestr_f   = pm->ObjHashRestr_f;
-	off->lifetime_f       = poh->lifetime_f;
-	off->cachetime_f      = poh->cachetime_f;
-	off->MsgHash_f        = poh->MsgHash_f;
-	off->skip_hop_offset  = poh->skip_hop_offset;
-	off->rpt_block_offset = poh->rpt_block_offset;
-}
-
-static void
-cefnetd_parsed_offsets_restore (
-	const CefT_ParsedOffsets* off,
-	CefT_CcnMsg_MsgBdy* pm,
-	CefT_CcnMsg_OptHdr* poh
-) {
-	pm->name_f            = off->name_f;
-	pm->end_chunk_num_f   = off->end_chunk_num_f;
-	pm->payload_f         = off->payload_f;
-	pm->KeyIdRestr_f      = off->KeyIdRestr_f;
-	pm->ObjHashRestr_f    = off->ObjHashRestr_f;
-	poh->lifetime_f       = off->lifetime_f;
-	poh->cachetime_f      = off->cachetime_f;
-	poh->MsgHash_f        = off->MsgHash_f;
-	poh->skip_hop_offset  = off->skip_hop_offset;
-	poh->rpt_block_offset = off->rpt_block_offset;
+	if (src_poh->MsgHash_len) {
+		poh->MsgHash_len = src_poh->MsgHash_len;
+		poh->MsgHash = src_poh->MsgHash;
+	}
+	return (cef_frame_message_parse (msg, payload_len, header_len, poh, pm, target_type));
 }
 
 /****************************************************************************************
@@ -150,8 +123,6 @@ cefnetd_packet_add_log_tag (
 	unsigned char* new_msg,
 	uint16_t* header_len,
 	uint16_t* payload_len,
-  CefT_CcnMsg_MsgBdy* pm,
-	CefT_CcnMsg_OptHdr* poh,
 	const unsigned char* log_tag,
 	uint16_t log_tag_len,
 	int overwrite
@@ -268,43 +239,6 @@ cefnetd_packet_add_log_tag (
 		memcpy (&new_msg[insert_pos + CefC_S_TLF], pen, pen_len);
 		index = insert_pos + CefC_S_TLF + pen_len;
 	}
-	/*
-	 * Parsed values (such as pm->name) are stored in arrays within pm/poh, not
-	 * as pointers into msg.  The *_f fields that are packet offsets must still
-	 * follow the inserted bytes, because they are used to access new_msg.  In
-	 * particular, the PIT uses lifetime_f to update the message later.
-	 */
-	if (pm->name_f >= shift_from) {
-		pm->name_f += delta;
-	}
-	if (pm->end_chunk_num_f >= shift_from) {
-		pm->end_chunk_num_f += delta;
-	}
-	if (pm->payload_f >= shift_from) {
-		pm->payload_f += delta;
-	}
-	if (pm->KeyIdRestr_f >= shift_from) {
-		pm->KeyIdRestr_f += delta;
-	}
-	if (pm->ObjHashRestr_f >= shift_from) {
-		pm->ObjHashRestr_f += delta;
-	}
-	if (poh->lifetime_f >= shift_from) {
-		poh->lifetime_f += delta;
-	}
-	if (poh->cachetime_f >= shift_from) {
-		poh->cachetime_f += delta;
-	}
-	if (poh->MsgHash_f >= shift_from) {
-		poh->MsgHash_f += delta;
-	}
-	if (poh->skip_hop_offset >= shift_from) {
-		poh->skip_hop_offset += delta;
-	}
-	if (poh->rpt_block_offset >= shift_from) {
-		poh->rpt_block_offset += delta;
-	}
-
   // add LOG_TAG TLV (with value of Log Tag) to the message
 	tlv_hdr = (struct tlv_hdr*) &new_msg[index];
 	tlv_hdr->type = htons (CefC_T_LOG_TAG);
@@ -367,16 +301,20 @@ cefnetd_interest_forward (
 		 * packets, so the tagged Interest is built in a separate buffer.
 		 */
 		unsigned char* tagged_msg = hdl->log_tag_buf;
-		CefT_ParsedOffsets saved_offsets;
+		CefT_CcnMsg_MsgBdy tagged_pm = { 0 };
+		CefT_CcnMsg_OptHdr tagged_poh = { 0 };
+		uint16_t tagged_header_len = header_len;
+		uint16_t tagged_payload_len = payload_len;
 
-		cefnetd_parsed_offsets_save (&saved_offsets, pm, poh);
-		if (cefnetd_packet_add_log_tag (msg, tagged_msg, &header_len, &payload_len, pm, poh,
+		/* pm/poh of the caller keep describing the original msg */
+		if (cefnetd_packet_add_log_tag (msg, tagged_msg, &tagged_header_len, &tagged_payload_len,
 				(unsigned char*) hdl->log_tag_name,
-				(uint16_t) strlen (hdl->log_tag_name), 0)) {
+				(uint16_t) strlen (hdl->log_tag_name), 0)
+			&& cefnetd_packet_reparse (tagged_msg, tagged_payload_len, tagged_header_len,
+				poh, &tagged_poh, &tagged_pm, CefC_PT_INTEREST) >= 0) {
 			cefnetd_interest_forward_core (hdl, faceids, faceid_num, peer_faceid,
-				tagged_msg, payload_len, header_len, pm, poh, pe, fe);
-			/* The caller keeps using the original msg with pm/poh */
-			cefnetd_parsed_offsets_restore (&saved_offsets, pm, poh);
+				tagged_msg, tagged_payload_len, tagged_header_len,
+				&tagged_pm, &tagged_poh, pe, fe);
 			return (1);
 		}
 	}
@@ -585,7 +523,8 @@ cefnetd_object_forward_with_log_tag (
 	memset (done, 0, sizeof (done));
 
 	for (i = 0; i < faceid_num; i++) {
-		CefT_ParsedOffsets saved_offsets;
+		CefT_CcnMsg_MsgBdy tagged_pm = { 0 };
+		CefT_CcnMsg_OptHdr tagged_poh = { 0 };
 		uint16_t tagged_header_len = header_len;
 		uint16_t tagged_payload_len = payload_len;
 		int tagged_f = 0;
@@ -605,15 +544,15 @@ cefnetd_object_forward_with_log_tag (
 		}
 
 		if (tag_lens[i] > 0 && tagged_msg != NULL) {
-			cefnetd_parsed_offsets_save (&saved_offsets, pm, poh);
 			tagged_f = cefnetd_packet_add_log_tag (msg, tagged_msg,
-				&tagged_header_len, &tagged_payload_len, pm, poh, tags[i], tag_lens[i], 1);
+				&tagged_header_len, &tagged_payload_len, tags[i], tag_lens[i], 1)
+				&& cefnetd_packet_reparse (tagged_msg, tagged_payload_len, tagged_header_len,
+					poh, &tagged_poh, &tagged_pm, CefC_PT_OBJECT) >= 0;
 		}
 		if (tagged_f) {
+			/* pm/poh of the caller keep describing the original msg */
 			cefnetd_object_forward (hdl, group, group_num, tagged_msg,
-				tagged_payload_len, tagged_header_len, pm, poh);
-			/* The caller keeps using the original msg with pm/poh */
-			cefnetd_parsed_offsets_restore (&saved_offsets, pm, poh);
+				tagged_payload_len, tagged_header_len, &tagged_pm, &tagged_poh);
 		} else {
 			cefnetd_object_forward (hdl, group, group_num, msg,
 				payload_len, header_len, pm, poh);
