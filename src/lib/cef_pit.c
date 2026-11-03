@@ -371,11 +371,6 @@ cef_pit_entry_lookup_with_lock (
 		entry->hashv = cef_lhash_tbl_hashv_get (pit, entry->key, entry->klen);
 		entry->clean_us = cef_client_present_timeus_get () + CefC_Pit_CleaningTime;
 		entry->tp_variant = poh->org.tp_variant;
-		entry->log_tag_len = poh->log_tag_len;
-		if (entry->log_tag_len > sizeof (entry->log_tag)) {
-			entry->log_tag_len = sizeof (entry->log_tag);
-		}
-		memcpy (entry->log_tag, poh->log_tag, entry->log_tag_len);
 		entry->adv_lifetime_us = 0;
 		entry->drp_lifetime_us = 0;
 #ifdef REFLEXIVE_FORWARDING
@@ -649,6 +644,15 @@ cef_dbg_write (CefC_Dbg_Finer, "IN faceid=%d\n", faceid );
 cef_dbg_write (CefC_Dbg_Fine, "lookup failed, faceid=%d\n", faceid );
 #endif // CefC_Debug
 		return (0);		// lookup failed
+	}
+
+	/* Keeps the Log Tag of the Interest per Down Face (the first tag wins) */
+	if (face->log_tag_len == 0 && poh && poh->log_tag_len > 0) {
+		face->log_tag_len = poh->log_tag_len;
+		if (face->log_tag_len > sizeof (face->log_tag)) {
+			face->log_tag_len = sizeof (face->log_tag);
+		}
+		memcpy (face->log_tag, poh->log_tag, face->log_tag_len);
 	}
 
 #ifdef	__PIT_DEBUG__

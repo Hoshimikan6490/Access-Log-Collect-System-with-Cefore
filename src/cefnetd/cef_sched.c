@@ -150,7 +150,8 @@ cefnetd_packet_add_log_tag (
   CefT_CcnMsg_MsgBdy* pm,
 	CefT_CcnMsg_OptHdr* poh,
 	const unsigned char* log_tag,
-	uint16_t log_tag_len
+	uint16_t log_tag_len,
+	int overwrite
 ) {
 	const struct fixed_hdr* in_hdr = (const struct fixed_hdr*) msg;
 	struct fixed_hdr* fix_hdr;
@@ -166,11 +167,15 @@ cefnetd_packet_add_log_tag (
 	uint16_t old_torg_len = 0;
 	uint16_t torg_pos = 0;
 	uint16_t log_tag_pos = 0;
+	uint16_t old_log_tag_len = 0;
 	uint16_t index;
 	uint16_t packet_len;
 	uint16_t insert_pos;
 	uint16_t insert_len;
-	int has_empty_log_tag = 0;
+	uint16_t skip_len = 0;
+	uint16_t shift_from;
+	int delta;
+	int has_log_tag = 0;
 	int has_own_torg = 0;
 
   // if log tag is empty or NULL, return 0
@@ -209,11 +214,13 @@ cefnetd_packet_add_log_tag (
 				break;
 			}
 			if (ntohs (rd_hdr->type) == CefC_T_LOG_TAG) {
-				if (sub_len > 0) {
+				/* An existing non-empty tag is kept unless the caller asks to replace it */
+				if (sub_len > 0 && !overwrite) {
 					return (0);
 				}
 				log_tag_pos = org_value_pos + index;
-				has_empty_log_tag = 1;
+				old_log_tag_len = sub_len;
+				has_log_tag = 1;
 				break;
 			}
 			index += CefC_S_TLF + sub_len;
@@ -223,35 +230,34 @@ cefnetd_packet_add_log_tag (
   // check if the message has enough space to add LOG_TAG TLV
 	packet_len = ntohs (in_hdr->pkt_len);
 	if (has_own_torg) {
-		uint16_t insert_len = has_empty_log_tag ? log_tag_len : add_len;
-		if (packet_len > CefC_Max_Msg_Size - insert_len
-			|| *header_len > CefC_Max_Header_Size - insert_len) {
-			return (0);
+		if (has_log_tag) {
+			/* Only the value of the existing LOG_TAG TLV is replaced */
+			insert_pos = log_tag_pos + CefC_S_TLF;
+			skip_len   = old_log_tag_len;
+			insert_len = log_tag_len;
+		} else {
+			insert_pos = torg_pos + CefC_S_TLF + old_torg_len;
+			insert_len = add_len;
 		}
-	} else {
-		uint16_t new_torg_len = CefC_S_TLF + pen_len + add_len;
-		if (packet_len > CefC_Max_Msg_Size - new_torg_len
-			|| *header_len > CefC_Max_Header_Size - new_torg_len) {
-			return (0);
-		}
-	}
-
-  // add LOG_TAG TLV (without value of Log Tag) to the copied message
-	if (has_own_torg) {
-		insert_len = has_empty_log_tag ? log_tag_len : add_len;
-		insert_pos = has_empty_log_tag
-			? log_tag_pos + CefC_S_TLF
-			: torg_pos + CefC_S_TLF + old_torg_len;
 	} else {
 		insert_pos = *header_len;
 		insert_len = CefC_S_TLF + pen_len + add_len;
 	}
+	delta = (int) insert_len - (int) skip_len;
+	if (delta > 0
+		&& (packet_len > CefC_Max_Msg_Size - delta
+			|| *header_len > CefC_Max_Header_Size - delta)) {
+		return (0);
+	}
+
+  // add LOG_TAG TLV (without value of Log Tag) to the copied message
+	shift_from = insert_pos + skip_len;
 	memcpy (new_msg, msg, insert_pos);
-	memcpy (&new_msg[insert_pos + insert_len], &msg[insert_pos], packet_len - insert_pos);
+	memcpy (&new_msg[insert_pos + insert_len], &msg[shift_from], packet_len - shift_from);
 	if (has_own_torg) {
 		tlv_hdr = (struct tlv_hdr*) &new_msg[torg_pos];
-		tlv_hdr->length = htons (old_torg_len + insert_len);
-		index = has_empty_log_tag ? log_tag_pos : insert_pos;
+		tlv_hdr->length = htons (old_torg_len + delta);
+		index = has_log_tag ? log_tag_pos : insert_pos;
 	} else {
 		tlv_hdr = (struct tlv_hdr*) &new_msg[insert_pos];
 		tlv_hdr->type = htons (CefC_T_OPT_ORG);
@@ -265,32 +271,32 @@ cefnetd_packet_add_log_tag (
 	 * follow the inserted bytes, because they are used to access new_msg.  In
 	 * particular, the PIT uses lifetime_f to update the message later.
 	 */
-	if (pm->name_f >= insert_pos) {
-		pm->name_f += insert_len;
+	if (pm->name_f >= shift_from) {
+		pm->name_f += delta;
 	}
-	if (pm->end_chunk_num_f >= insert_pos) {
-		pm->end_chunk_num_f += insert_len;
+	if (pm->end_chunk_num_f >= shift_from) {
+		pm->end_chunk_num_f += delta;
 	}
-	if (pm->payload_f >= insert_pos) {
-		pm->payload_f += insert_len;
+	if (pm->payload_f >= shift_from) {
+		pm->payload_f += delta;
 	}
-	if (pm->KeyIdRestr_f >= insert_pos) {
-		pm->KeyIdRestr_f += insert_len;
+	if (pm->KeyIdRestr_f >= shift_from) {
+		pm->KeyIdRestr_f += delta;
 	}
-	if (pm->ObjHashRestr_f >= insert_pos) {
-		pm->ObjHashRestr_f += insert_len;
+	if (pm->ObjHashRestr_f >= shift_from) {
+		pm->ObjHashRestr_f += delta;
 	}
-	if (poh->lifetime_f >= insert_pos) {
-		poh->lifetime_f += insert_len;
+	if (poh->lifetime_f >= shift_from) {
+		poh->lifetime_f += delta;
 	}
-	if (poh->MsgHash_f >= insert_pos) {
-		poh->MsgHash_f += insert_len;
+	if (poh->MsgHash_f >= shift_from) {
+		poh->MsgHash_f += delta;
 	}
-	if (poh->skip_hop_offset >= insert_pos) {
-		poh->skip_hop_offset += insert_len;
+	if (poh->skip_hop_offset >= shift_from) {
+		poh->skip_hop_offset += delta;
 	}
-	if (poh->rpt_block_offset >= insert_pos) {
-		poh->rpt_block_offset += insert_len;
+	if (poh->rpt_block_offset >= shift_from) {
+		poh->rpt_block_offset += delta;
 	}
 
   // add LOG_TAG TLV (with value of Log Tag) to the message
@@ -298,7 +304,7 @@ cefnetd_packet_add_log_tag (
 	tlv_hdr->type = htons (CefC_T_LOG_TAG);
 	tlv_hdr->length = htons (log_tag_len);
 	memcpy (&new_msg[index + CefC_S_TLF], log_tag, log_tag_len);
-	*header_len += insert_len;
+	*header_len += delta;
 	fix_hdr = (struct fixed_hdr*) new_msg;
 	fix_hdr->hdr_len = (uint8_t) *header_len;
 	fix_hdr->pkt_len = htons (*header_len + *payload_len);
@@ -360,7 +366,7 @@ cefnetd_interest_forward (
 		cefnetd_parsed_offsets_save (&saved_offsets, pm, poh);
 		if (cefnetd_packet_add_log_tag (msg, tagged_msg, &header_len, &payload_len, pm, poh,
 				(unsigned char*) hdl->log_tag_name,
-				(uint16_t) strlen (hdl->log_tag_name))) {
+				(uint16_t) strlen (hdl->log_tag_name), 0)) {
 			cefnetd_interest_forward_core (hdl, faceids, faceid_num, peer_faceid,
 				tagged_msg, payload_len, header_len, pm, poh, pe, fe);
 			/* The caller keeps using the original msg with pm/poh */
@@ -537,6 +543,75 @@ cefnetd_object_forward (
 		/* Forwards the ContentObject according to Forwarding Strategy. */
 		hdl->fwd_strtgy_hdl->fwd_cob(&fwdstr);
 
+	}
+
+	return (1);
+}
+
+/*--------------------------------------------------------------------------------------
+	Forwards the specified Content Object with the Log Tag of each Face
+----------------------------------------------------------------------------------------*/
+int											/* Returns a negative value if it fails 	*/
+cefnetd_object_forward_with_log_tag (
+	CefT_Netd_Handle* hdl,					/* cefnetd handle							*/
+	uint16_t faceids[], 					/* Face-IDs to forward						*/
+	uint16_t faceid_num, 					/* Number of Face-IDs to forward			*/
+	const unsigned char* const tags[],		/* Log Tag for each Face-ID					*/
+	const uint16_t tag_lens[],				/* Length of Log Tag for each Face-ID		*/
+	unsigned char* msg, 					/* received message to handle				*/
+	uint16_t payload_len, 					/* Payload Length of this message			*/
+	uint16_t header_len,					/* Header Length of this message			*/
+	CefT_CcnMsg_MsgBdy* pm, 				/* Parsed message 							*/
+	CefT_CcnMsg_OptHdr* poh 				/* Parsed Option Header						*/
+) {
+	uint16_t group[CefC_Fib_UpFace_Max];
+	uint8_t done[CefC_Fib_UpFace_Max];
+	/*
+	 * msg points into the receive buffer which also holds the following
+	 * packets, so the tagged Object is built in a separate buffer.
+	 */
+	unsigned char tagged_msg[CefC_Max_Msg_Size];
+	uint16_t i, j, group_num;
+
+	if (faceid_num > CefC_Fib_UpFace_Max) {
+		faceid_num = CefC_Fib_UpFace_Max;
+	}
+	memset (done, 0, sizeof (done));
+
+	for (i = 0; i < faceid_num; i++) {
+		CefT_ParsedOffsets saved_offsets;
+		uint16_t tagged_header_len = header_len;
+		uint16_t tagged_payload_len = payload_len;
+		int tagged_f = 0;
+
+		if (done[i]) {
+			continue;
+		}
+
+		/* Faces which get the same Log Tag are sent together */
+		group_num = 0;
+		for (j = i; j < faceid_num; j++) {
+			if (!done[j] && tag_lens[j] == tag_lens[i] &&
+				(tag_lens[i] == 0 || memcmp (tags[j], tags[i], tag_lens[i]) == 0)) {
+				group[group_num++] = faceids[j];
+				done[j] = 1;
+			}
+		}
+
+		if (tag_lens[i] > 0) {
+			cefnetd_parsed_offsets_save (&saved_offsets, pm, poh);
+			tagged_f = cefnetd_packet_add_log_tag (msg, tagged_msg,
+				&tagged_header_len, &tagged_payload_len, pm, poh, tags[i], tag_lens[i], 1);
+		}
+		if (tagged_f) {
+			cefnetd_object_forward (hdl, group, group_num, tagged_msg,
+				tagged_payload_len, tagged_header_len, pm, poh);
+			/* The caller keeps using the original msg with pm/poh */
+			cefnetd_parsed_offsets_restore (&saved_offsets, pm, poh);
+		} else {
+			cefnetd_object_forward (hdl, group, group_num, msg,
+				payload_len, header_len, pm, poh);
+		}
 	}
 
 	return (1);

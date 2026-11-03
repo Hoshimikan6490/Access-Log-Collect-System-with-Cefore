@@ -4250,6 +4250,8 @@ cefnetd_incoming_object_process_core (
 	int res;
 	uint8_t faceid_bitmap[CefC_Face_Router_Max];
 	uint16_t faceids[CefC_Fib_UpFace_Max];
+	const unsigned char* face_tags[CefC_Fib_UpFace_Max];	/* Log Tag kept in PIT for each faceids[] */
+	uint16_t face_tag_lens[CefC_Fib_UpFace_Max];
 	uint16_t face_num = 0;
 	CefT_Down_Faces* face;
 	CefT_Rx_Elem elem;
@@ -4446,6 +4448,8 @@ cefnetd_incoming_object_process_core (
 				face = face->next;
 				if ( !cefnetd_faceidmap_is_set(faceid_bitmap, face->faceid) ){
 					cefnetd_faceidmap_set(faceid_bitmap, face->faceid);
+					face_tags[face_num] = face->log_tag;
+					face_tag_lens[face_num] = face->log_tag_len;
 					faceids[face_num++] = face->faceid;
 				}
 			}
@@ -4540,35 +4544,37 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 		Forwards the Content Object
 	----------------------------------------------------------------------*/
 	/*
-	 * msg points into the receive buffer which also holds the following
-	 * packets, so the tagged Data is built in a separate buffer.  It must live
-	 * until the Data is forwarded below.
+	 * Log Tag handling.  Each downstream Face gets the Data with the Log Tag of
+	 * the Interest which came from that Face (kept in the PIT).
+	 *  - Data which already has a Log Tag (from an upstream router or from a cache)
+	 *    is tagged again for each Face.
+	 *  - Data without a Log Tag is tagged only if it comes from a local producer and
+	 *    its name is enabled in log_tag.yaml.
+	 *  - Otherwise, the Data is forwarded as it is.
 	 */
-	unsigned char tagged_msg[CefC_Max_Msg_Size];
-
-	if (hdl->access_log_f && obj_sender_type == CefC_OBJ_Sender_Type_Neighbor &&
-		cefnetd_log_tag_is_enabled (hdl, &pm)) {
-		for (pe_seq = 0; pe_seq < CefC_PIT_SEARCH_TYPE_NUM; pe_seq++) {
-			if (pe[pe_seq] != NULL && pe[pe_seq]->log_tag_len > 0) {
-				if (cefnetd_packet_add_log_tag (msg, tagged_msg, &header_len, &payload_len,
-						&pm, &poh, pe[pe_seq]->log_tag, pe[pe_seq]->log_tag_len)) {
-					msg = tagged_msg;
-				}
-				break;
-			}
+	int log_tag_f = 0;
+	if (hdl->access_log_f) {
+		if (poh.log_tag_len > 0) {
+			log_tag_f = 1;
+		} else if (obj_sender_type == CefC_OBJ_Sender_Type_Neighbor &&
+			cef_face_is_local_face (peer_faceid) &&
+			cefnetd_log_tag_is_enabled (hdl, &pm)) {
+			log_tag_f = 1;
 		}
 	}
-	/* Cache response LOG_TAG propagation is intentionally deferred. */
-	/* if (obj_sender_type == CefC_OBJ_Sender_Type_Csmgr ||
-		obj_sender_type == CefC_OBJ_Sender_Type_Localcache) { ... } */
+
 	if (tp_plugin_res & CefC_Pi_Object_Send) {
 		if (face_num > 0) {
 #ifdef CefC_Debug
 			cef_dbg_write (CefC_Dbg_Finer, "Forward the Content Object to cefnetd(s)\n");
 #endif // CefC_Debug
-			cefnetd_object_forward (hdl, faceids, face_num, msg,
-				payload_len, header_len, &pm, &poh);
-
+			if (log_tag_f) {
+				cefnetd_object_forward_with_log_tag (hdl, faceids, face_num,
+					face_tags, face_tag_lens, msg, payload_len, header_len, &pm, &poh);
+			} else {
+				cefnetd_object_forward (hdl, faceids, face_num, msg,
+					payload_len, header_len, &pm, &poh);
+			}
 		}
 		tp_plugin_res |= CefC_Pi_Object_SendComp;
 	}
