@@ -96,8 +96,11 @@ typedef struct {
 	uint8_t enabled;
 } CefT_LogTag_Content_Config;
 
+/* Builds the tagged packet in new_msg (CefC_Max_Msg_Size bytes) without modifying msg.	*/
+/* Returns 1 if tagged (use new_msg afterward), otherwise 0 (keep using msg).			*/
 int cefnetd_packet_add_log_tag (
-	unsigned char* msg,
+	const unsigned char* msg,
+	unsigned char* new_msg,
 	uint16_t* header_len,
 	uint16_t* payload_len,
   CefT_CcnMsg_MsgBdy* pm,

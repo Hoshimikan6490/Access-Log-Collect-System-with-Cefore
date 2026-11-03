@@ -4539,12 +4539,21 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 	/*--------------------------------------------------------------------
 		Forwards the Content Object
 	----------------------------------------------------------------------*/
+	/*
+	 * msg points into the receive buffer which also holds the following
+	 * packets, so the tagged Data is built in a separate buffer.  It must live
+	 * until the Data is forwarded below.
+	 */
+	unsigned char tagged_msg[CefC_Max_Msg_Size];
+
 	if (hdl->access_log_f && obj_sender_type == CefC_OBJ_Sender_Type_Neighbor &&
 		cefnetd_log_tag_is_enabled (hdl, &pm)) {
 		for (pe_seq = 0; pe_seq < CefC_PIT_SEARCH_TYPE_NUM; pe_seq++) {
 			if (pe[pe_seq] != NULL && pe[pe_seq]->log_tag_len > 0) {
-				cefnetd_packet_add_log_tag (msg, &header_len, &payload_len, &pm, &poh,
-					pe[pe_seq]->log_tag, pe[pe_seq]->log_tag_len);
+				if (cefnetd_packet_add_log_tag (msg, tagged_msg, &header_len, &payload_len,
+						&pm, &poh, pe[pe_seq]->log_tag, pe[pe_seq]->log_tag_len)) {
+					msg = tagged_msg;
+				}
 				break;
 			}
 		}
