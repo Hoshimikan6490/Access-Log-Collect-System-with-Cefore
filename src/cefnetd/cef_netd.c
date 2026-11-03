@@ -539,7 +539,7 @@ cefnetd_FHR_Reply_process(
 static	int
 cefnetd_ccninfo_loop_check(
 	CefT_Netd_Handle* hdl,					/* cefnetd handle							*/
-CefT_Parsed_Ccninfo* pci
+  CefT_Parsed_Ccninfo* pci
 );
 
 static void
