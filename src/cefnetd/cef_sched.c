@@ -56,6 +56,7 @@ typedef struct {
 	uint16_t KeyIdRestr_f;
 	uint16_t ObjHashRestr_f;
 	uint16_t lifetime_f;
+	uint16_t cachetime_f;
 	uint16_t MsgHash_f;
 	uint16_t skip_hop_offset;
 	uint16_t rpt_block_offset;
@@ -109,6 +110,7 @@ cefnetd_parsed_offsets_save (
 	off->KeyIdRestr_f     = pm->KeyIdRestr_f;
 	off->ObjHashRestr_f   = pm->ObjHashRestr_f;
 	off->lifetime_f       = poh->lifetime_f;
+	off->cachetime_f      = poh->cachetime_f;
 	off->MsgHash_f        = poh->MsgHash_f;
 	off->skip_hop_offset  = poh->skip_hop_offset;
 	off->rpt_block_offset = poh->rpt_block_offset;
@@ -126,6 +128,7 @@ cefnetd_parsed_offsets_restore (
 	pm->KeyIdRestr_f      = off->KeyIdRestr_f;
 	pm->ObjHashRestr_f    = off->ObjHashRestr_f;
 	poh->lifetime_f       = off->lifetime_f;
+	poh->cachetime_f      = off->cachetime_f;
 	poh->MsgHash_f        = off->MsgHash_f;
 	poh->skip_hop_offset  = off->skip_hop_offset;
 	poh->rpt_block_offset = off->rpt_block_offset;
@@ -288,6 +291,9 @@ cefnetd_packet_add_log_tag (
 	}
 	if (poh->lifetime_f >= shift_from) {
 		poh->lifetime_f += delta;
+	}
+	if (poh->cachetime_f >= shift_from) {
+		poh->cachetime_f += delta;
 	}
 	if (poh->MsgHash_f >= shift_from) {
 		poh->MsgHash_f += delta;
