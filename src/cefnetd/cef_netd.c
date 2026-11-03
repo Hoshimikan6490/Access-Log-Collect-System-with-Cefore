@@ -6032,9 +6032,15 @@ cefnetd_log_tag_is_enabled (
 	CefT_Netd_Handle* hdl,
 	CefT_CcnMsg_MsgBdy* pm
 ) {
-	char uri[CefC_NAME_BUFSIZ];
+	/*
+	 * The conversion helper does no bounds checking. In the worst case every name byte is expanded to 2 hex characters, so the output is at most 2 * name_len plus the "ccnx:/" prefix and a few separators. The extra margin covers those.
+	 */
+	char uri[CefC_NAME_BUFSIZ + 16];
 	uint16_t i;
 
+	if (pm->name_len > CefC_NAME_MAXLEN) {
+		return (0);
+	}
 	for (i = 0; i < hdl->log_tag_content_num; i++) {
 		if (hdl->log_tag_contents[i].enabled) {
 			break;
