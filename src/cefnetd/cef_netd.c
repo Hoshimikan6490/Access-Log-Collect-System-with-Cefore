@@ -814,6 +814,7 @@ cefnetd_handle_create (
 	hdl->port_num 		= CefC_Default_PortNum;
 	hdl->log_tag_name[0] = '\0';
 	hdl->access_log_f		= 0;
+	hdl->log_tag_buf		= NULL;
 	hdl->fib_max_size 	= CefC_Default_FibSize;
 	hdl->pit_max_size 	= CefC_Default_PitSize;
 	hdl->sk_type 		= CefC_Default_Sktype;
@@ -1222,6 +1223,15 @@ cefnetd_handle_create (
 		}
 	}
 
+	/* Scratch buffer used to build packets with a Log Tag (see cef_sched.c) */
+	hdl->log_tag_buf = (unsigned char*) malloc (CefC_Max_Msg_Size);
+	if (hdl->log_tag_buf == NULL) {
+		cef_log_write (CefC_Log_Error,
+			"%s log_tag_buf memory allocation failed (%s)\n", __func__, strerror (errno));
+		cefnetd_handle_destroy (hdl);
+		return (NULL);
+	}
+
 	hdl->app_rsp_msg = calloc(10, CefC_Max_Length);
 	if (hdl->app_rsp_msg == NULL){
 		cefnetd_handle_destroy (hdl);
@@ -1397,6 +1407,8 @@ cefnetd_handle_destroy (
 
 	if ( hdl->app_rsp_msg )
 		free(hdl->app_rsp_msg);
+	if ( hdl->log_tag_buf )
+		free(hdl->log_tag_buf);
 	if ( hdl->My_Node_Name_TLV )
 		free(hdl->My_Node_Name_TLV);
 	if ( hdl->My_Node_Name )

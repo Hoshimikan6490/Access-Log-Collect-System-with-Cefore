@@ -361,12 +361,12 @@ cefnetd_interest_forward (
 		}
 		msg[CefC_O_Fix_HopLimit] = pm->hoplimit;
 	}
-	if (hdl->access_log_f) {
+	if (hdl->access_log_f && hdl->log_tag_buf != NULL) {
 		/*
 		 * msg points into the receive buffer which also holds the following
 		 * packets, so the tagged Interest is built in a separate buffer.
 		 */
-		unsigned char tagged_msg[CefC_Max_Msg_Size];
+		unsigned char* tagged_msg = hdl->log_tag_buf;
 		CefT_ParsedOffsets saved_offsets;
 
 		cefnetd_parsed_offsets_save (&saved_offsets, pm, poh);
@@ -576,7 +576,7 @@ cefnetd_object_forward_with_log_tag (
 	 * msg points into the receive buffer which also holds the following
 	 * packets, so the tagged Object is built in a separate buffer.
 	 */
-	unsigned char tagged_msg[CefC_Max_Msg_Size];
+	unsigned char* tagged_msg = hdl->log_tag_buf;
 	uint16_t i, j, group_num;
 
 	if (faceid_num > CefC_Fib_UpFace_Max) {
@@ -604,7 +604,7 @@ cefnetd_object_forward_with_log_tag (
 			}
 		}
 
-		if (tag_lens[i] > 0) {
+		if (tag_lens[i] > 0 && tagged_msg != NULL) {
 			cefnetd_parsed_offsets_save (&saved_offsets, pm, poh);
 			tagged_f = cefnetd_packet_add_log_tag (msg, tagged_msg,
 				&tagged_header_len, &tagged_payload_len, pm, poh, tags[i], tag_lens[i], 1);

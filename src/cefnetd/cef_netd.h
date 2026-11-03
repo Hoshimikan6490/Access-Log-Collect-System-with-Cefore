@@ -200,6 +200,8 @@ typedef struct {
 	char				local_sock_id[CefC_LOCAL_SOCK_ID_SIZ + 1];
 	char				log_tag_name[CefC_Max_Log_Tag_Size + 1];
 	int				access_log_f;				/* 0:Disable 1:Enable access log		*/
+	// Scratch buffer (CefC_Max_Msg_Size bytes) in which a packet with a Log Tag is built.
+	unsigned char*	log_tag_buf;
 	uint16_t		log_tag_content_num;  /* Count of log tag contents */
 	CefT_LogTag_Content_Config log_tag_contents[CefC_LogTag_Content_Max]; /* Log tag contents */
 	uint32_t 			fib_max_size;			/* Maximum FIB entry 					*/
