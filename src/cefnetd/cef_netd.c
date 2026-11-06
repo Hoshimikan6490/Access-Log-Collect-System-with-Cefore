@@ -4558,17 +4558,19 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 	 * Log Tag handling.  Each downstream Face gets the Data with the Log Tag of
 	 * the Interest which came from that Face (kept in the PIT).
 	 *  - Data which already has a Log Tag (from an upstream router or from a cache)
-	 *    is tagged again for each Face.
-	 *  - Data without a Log Tag is tagged only if it comes from a local producer and
-	 *    its name is enabled in log_tag.yaml.
-	 *  - Otherwise, the Data is forwarded as it is.
+	 *    is tagged again for each Face.  log_tag.yaml is not consulted.
+	 *  - Data without a Log Tag is tagged only when this node acts as the producer,
+	 *    that is, the Data comes from a local producer Face, the local cache or csmgrd,
+	 *    and its name is enabled in log_tag.yaml.
+	 *  - Data without a Log Tag from an upstream router is forwarded as it is,
+	 *    because the upstream decided that it is not a collection target.
 	 */
 	int log_tag_f = 0;
 	if (hdl->access_log_f) {
 		if (poh.log_tag_len > 0) {
 			log_tag_f = 1;
-		} else if (obj_sender_type == CefC_OBJ_Sender_Type_Neighbor &&
-			cef_face_is_local_face (peer_faceid) &&
+		} else if ((obj_sender_type != CefC_OBJ_Sender_Type_Neighbor ||
+				cef_face_is_local_face (peer_faceid)) &&
 			cefnetd_log_tag_is_enabled (hdl, &pm)) {
 			log_tag_f = 1;
 		}
