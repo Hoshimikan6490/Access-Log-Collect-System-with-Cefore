@@ -5952,7 +5952,7 @@ cefnetd_log_tag_config_read (
 	CefT_Netd_Handle* hdl
 ) {
 	char config_dir[CefC_BufSiz_1KB];
-	char path[CefC_BufSiz_1KB];
+	char path[CefC_BufSiz_2KB];
 	char line[CefC_BufSiz_1KB];
 	char* value;
 	char* end;
@@ -6012,7 +6012,7 @@ cefnetd_log_tag_config_read (
 			hdl->log_tag_contents[hdl->log_tag_content_num].wildcard = 0;
 			hdl->log_tag_contents[hdl->log_tag_content_num].name_len =
 				(uint16_t) strlen (hdl->log_tag_contents[hdl->log_tag_content_num].name);
-			/* "ccnx:/a/b/*" matches every name under "ccnx:/a/b/" */
+			// "ccnx:/a/b/*" matches every name under "ccnx:/a/b/"
 			if (hdl->log_tag_contents[hdl->log_tag_content_num].name_len >= 2 &&
 				strcmp (&hdl->log_tag_contents[hdl->log_tag_content_num].name[
 					hdl->log_tag_contents[hdl->log_tag_content_num].name_len - 2], "/*") == 0) {
