@@ -48,7 +48,6 @@
  Structures Declaration
  ****************************************************************************************/
 
-
 /****************************************************************************************
  State Variables
  ****************************************************************************************/
@@ -58,18 +57,79 @@
  Static Function Declaration
  ****************************************************************************************/
 
+static int
+cefnetd_packet_reparse (
+	unsigned char* msg,
+	uint16_t payload_len,
+	uint16_t header_len,
+	const CefT_CcnMsg_OptHdr* src_poh,
+	CefT_CcnMsg_OptHdr* poh,
+	CefT_CcnMsg_MsgBdy* pm,
+	int target_type
+);
+static void
+cefnetd_interest_forward_core (
+	CefT_Netd_Handle* hdl,
+	uint16_t faceids[],
+	uint16_t faceid_num,
+	int peer_faceid,
+	unsigned char* msg,
+	uint16_t payload_len,
+	uint16_t header_len,
+	CefT_CcnMsg_MsgBdy* pm,
+	CefT_CcnMsg_OptHdr* poh,
+	CefT_Pit_Entry* pe,
+	CefT_Fib_Entry* fe
+);
+
+/*
+ * Parses the tagged packet into poh/pm, which the caller zero-initializes.
+ * Every offset (name_f, lifetime_f, ...) is then taken from new_msg by the parser, so
+ * no list of offset fields has to be maintained here.  The caller's own pm/poh
+ * (which describe the original msg) are left untouched.
+ * The message hash does not depend on the header, so it is copied from src_poh
+ * instead of being calculated again.
+ */
+static int										/* Returns a negative value if it fails 	*/
+cefnetd_packet_reparse (
+	unsigned char* msg,						/* tagged message							*/
+	uint16_t payload_len,
+	uint16_t header_len,
+	const CefT_CcnMsg_OptHdr* src_poh,		/* Parsed Option Header of the original		*/
+	CefT_CcnMsg_OptHdr* poh,				/* [out] Parsed Option Header of msg		*/
+	CefT_CcnMsg_MsgBdy* pm,					/* [out] Parsed message of msg				*/
+	int target_type
+) {
+	if (src_poh->MsgHash_len) {
+		poh->MsgHash_len = src_poh->MsgHash_len;
+		poh->MsgHash = src_poh->MsgHash;
+	}
+	return (cef_frame_message_parse (msg, payload_len, header_len, poh, pm, target_type));
+}
+
 /****************************************************************************************
  ****************************************************************************************/
-static int
-cefnetd_interest_add_log_tag (
-	CefT_Netd_Handle* hdl,
-	unsigned char* msg,
+/*
+ * Builds a copy of msg with the LOG_TAG TLV added into new_msg.
+ * msg is never modified, because it usually lives in the per-face receive buffer
+ * together with the following packets.  new_msg must hold CefC_Max_Msg_Size bytes
+ * and must not overlap msg.
+ * Returns 1 if the tag was added (the packet is in new_msg and header_len/payload_len
+ * are updated), otherwise 0 (new_msg is not valid and the caller keeps using msg).
+ */
+int
+cefnetd_packet_add_log_tag (
+	const unsigned char* msg,
+	unsigned char* new_msg,
 	uint16_t* header_len,
 	uint16_t* payload_len,
-	CefT_CcnMsg_MsgBdy* pm,
-	CefT_CcnMsg_OptHdr* poh
+	const unsigned char* log_tag,
+	uint16_t log_tag_len,
+	int overwrite
 ) {
-	struct fixed_hdr* fix_hdr = (struct fixed_hdr*) msg;
+	const struct fixed_hdr* in_hdr = (const struct fixed_hdr*) msg;
+	struct fixed_hdr* fix_hdr;
+	const struct tlv_hdr* rd_hdr;
 	struct tlv_hdr* tlv_hdr;
 	const uint16_t pen_len = 3;
 	const unsigned char pen[] = {
@@ -77,20 +137,23 @@ cefnetd_interest_add_log_tag (
 		(CefC_NICT_PEN >> 8) & 0xff,
 		CefC_NICT_PEN & 0xff
 	};
-	uint16_t log_tag_len = (uint16_t) strlen (hdl->local_sock_id);
 	uint16_t add_len = CefC_S_TLF + log_tag_len;
 	uint16_t old_torg_len = 0;
 	uint16_t torg_pos = 0;
 	uint16_t log_tag_pos = 0;
+	uint16_t old_log_tag_len = 0;
 	uint16_t index;
 	uint16_t packet_len;
 	uint16_t insert_pos;
 	uint16_t insert_len;
-	int has_empty_log_tag = 0;
+	uint16_t skip_len = 0;
+	uint16_t shift_from;
+	int delta;
+	int has_log_tag = 0;
 	int has_own_torg = 0;
 
-  // check if the message has enough space to add LOG_TAG TLV
-	if (log_tag_len == 0 || poh == NULL || pm == NULL) {
+  // if log tag is empty or NULL, return 0
+	if (log_tag_len == 0 || log_tag == NULL) {
 		return (0);
 	}
 
@@ -98,12 +161,12 @@ cefnetd_interest_add_log_tag (
 	index = CefC_S_Fix_Header;
 	while (index + CefC_S_TLF <= *header_len) {
 		uint16_t torg_len;
-		tlv_hdr = (struct tlv_hdr*) &msg[index];
-		torg_len = ntohs (tlv_hdr->length);
+		rd_hdr = (const struct tlv_hdr*) &msg[index];
+		torg_len = ntohs (rd_hdr->length);
 		if (torg_len > *header_len - index - CefC_S_TLF) {
 			break;
 		}
-		if (ntohs (tlv_hdr->type) == CefC_T_OPT_ORG
+		if (ntohs (rd_hdr->type) == CefC_T_OPT_ORG
 			&& torg_len >= pen_len
 			&& memcmp (&msg[index + CefC_S_TLF], pen, pen_len) == 0) {
 			torg_pos = index;
@@ -119,17 +182,19 @@ cefnetd_interest_add_log_tag (
 		index = 0;
 		while (index + CefC_S_TLF <= org_value_len) {
 			uint16_t sub_len;
-			tlv_hdr = (struct tlv_hdr*) &msg[org_value_pos + index];
-			sub_len = ntohs (tlv_hdr->length);
+			rd_hdr = (const struct tlv_hdr*) &msg[org_value_pos + index];
+			sub_len = ntohs (rd_hdr->length);
 			if (sub_len > org_value_len - index - CefC_S_TLF) {
 				break;
 			}
-			if (ntohs (tlv_hdr->type) == CefC_T_LOG_TAG) {
-				if (sub_len > 0) {
+			if (ntohs (rd_hdr->type) == CefC_T_LOG_TAG) {
+				/* An existing non-empty tag is kept unless the caller asks to replace it */
+				if (sub_len > 0 && !overwrite) {
 					return (0);
 				}
 				log_tag_pos = org_value_pos + index;
-				has_empty_log_tag = 1;
+				old_log_tag_len = sub_len;
+				has_log_tag = 1;
 				break;
 			}
 			index += CefC_S_TLF + sub_len;
@@ -137,87 +202,50 @@ cefnetd_interest_add_log_tag (
 	}
 
   // check if the message has enough space to add LOG_TAG TLV
-	packet_len = ntohs (fix_hdr->pkt_len);
+	packet_len = ntohs (in_hdr->pkt_len);
 	if (has_own_torg) {
-		uint16_t insert_len = has_empty_log_tag ? log_tag_len : add_len;
-		if (packet_len > CefC_Max_Msg_Size - insert_len
-			|| *header_len > CefC_Max_Header_Size - insert_len) {
-			return (0);
+		if (has_log_tag) {
+			/* Only the value of the existing LOG_TAG TLV is replaced */
+			insert_pos = log_tag_pos + CefC_S_TLF;
+			skip_len   = old_log_tag_len;
+			insert_len = log_tag_len;
+		} else {
+			insert_pos = torg_pos + CefC_S_TLF + old_torg_len;
+			insert_len = add_len;
 		}
-	} else {
-		uint16_t new_torg_len = CefC_S_TLF + pen_len + add_len;
-		if (packet_len > CefC_Max_Msg_Size - new_torg_len
-			|| *header_len > CefC_Max_Header_Size - new_torg_len) {
-			return (0);
-		}
-	}
-
-  // add LOG_TAG TLV (without value of Log Tag) to the message
-	if (has_own_torg) {
-		insert_len = has_empty_log_tag ? log_tag_len : add_len;
-		insert_pos = has_empty_log_tag
-			? log_tag_pos + CefC_S_TLF
-			: torg_pos + CefC_S_TLF + old_torg_len;
-		memmove (&msg[insert_pos + insert_len], &msg[insert_pos], packet_len - insert_pos);
-		tlv_hdr = (struct tlv_hdr*) &msg[torg_pos];
-		tlv_hdr->length = htons (old_torg_len + insert_len);
-		index = has_empty_log_tag ? log_tag_pos : insert_pos;
 	} else {
 		insert_pos = *header_len;
-		uint16_t new_torg_len = CefC_S_TLF + pen_len + add_len;
-		insert_len = new_torg_len;
-		memmove (&msg[insert_pos + new_torg_len], &msg[insert_pos], packet_len - insert_pos);
-		tlv_hdr = (struct tlv_hdr*) &msg[insert_pos];
-		tlv_hdr->type = htons (CefC_T_OPT_ORG);
-		tlv_hdr->length = htons (pen_len + add_len);
-		memcpy (&msg[insert_pos + CefC_S_TLF], pen, pen_len);
-		index = insert_pos + CefC_S_TLF + pen_len;
+		insert_len = CefC_S_TLF + pen_len + add_len;
 	}
-	/*
-	 * Parsed values (such as pm->name) are stored in arrays within pm/poh, not
-	 * as pointers into msg.  The *_f fields that are packet offsets must still
-	 * follow the moved bytes.  In particular, the PIT uses lifetime_f to update
-	 * msg later.
-	 */
-	if (pm->name_f >= insert_pos) {
-		pm->name_f += insert_len;
-	}
-	if (pm->end_chunk_num_f >= insert_pos) {
-		pm->end_chunk_num_f += insert_len;
-	}
-	if (pm->payload_f >= insert_pos) {
-		pm->payload_f += insert_len;
-	}
-	if (pm->KeyIdRestr_f >= insert_pos) {
-		pm->KeyIdRestr_f += insert_len;
-	}
-	if (pm->ObjHashRestr_f >= insert_pos) {
-		pm->ObjHashRestr_f += insert_len;
-	}
-	if (poh->lifetime_f >= insert_pos) {
-		poh->lifetime_f += insert_len;
-	}
-	if (poh->MsgHash_f >= insert_pos) {
-		poh->MsgHash_f += insert_len;
-	}
-	if (poh->skip_hop_offset >= insert_pos) {
-		poh->skip_hop_offset += insert_len;
-	}
-	if (poh->rpt_block_offset >= insert_pos) {
-		poh->rpt_block_offset += insert_len;
+	delta = (int) insert_len - (int) skip_len;
+	if (delta > 0
+		&& (packet_len > CefC_Max_Msg_Size - delta
+			|| *header_len > CefC_Max_Header_Size - delta)) {
+		return (0);
 	}
 
+  // add LOG_TAG TLV (without value of Log Tag) to the copied message
+	shift_from = insert_pos + skip_len;
+	memcpy (new_msg, msg, insert_pos);
+	memcpy (&new_msg[insert_pos + insert_len], &msg[shift_from], packet_len - shift_from);
+	if (has_own_torg) {
+		tlv_hdr = (struct tlv_hdr*) &new_msg[torg_pos];
+		tlv_hdr->length = htons (old_torg_len + delta);
+		index = has_log_tag ? log_tag_pos : insert_pos;
+	} else {
+		tlv_hdr = (struct tlv_hdr*) &new_msg[insert_pos];
+		tlv_hdr->type = htons (CefC_T_OPT_ORG);
+		tlv_hdr->length = htons (pen_len + add_len);
+		memcpy (&new_msg[insert_pos + CefC_S_TLF], pen, pen_len);
+		index = insert_pos + CefC_S_TLF + pen_len;
+	}
   // add LOG_TAG TLV (with value of Log Tag) to the message
-	tlv_hdr = (struct tlv_hdr*) &msg[index];
+	tlv_hdr = (struct tlv_hdr*) &new_msg[index];
 	tlv_hdr->type = htons (CefC_T_LOG_TAG);
 	tlv_hdr->length = htons (log_tag_len);
-	memcpy (&msg[index + CefC_S_TLF], hdl->local_sock_id, log_tag_len);
-	if (has_own_torg) {
-		*header_len += insert_len;
-	} else {
-		uint16_t new_torg_len = CefC_S_TLF + pen_len + add_len;
-		*header_len += new_torg_len;
-	}
+	memcpy (&new_msg[index + CefC_S_TLF], log_tag, log_tag_len);
+	*header_len += delta;
+	fix_hdr = (struct fixed_hdr*) new_msg;
 	fix_hdr->hdr_len = (uint8_t) *header_len;
 	fix_hdr->pkt_len = htons (*header_len + *payload_len);
 	return (1);
@@ -241,8 +269,6 @@ cefnetd_interest_forward (
 	CefT_Pit_Entry* pe, 					/* PIT entry matching this Interest 		*/
 	CefT_Fib_Entry* fe						/* FIB entry matching this Interest 		*/
 ) {
-	CefT_FwdStrtgy_Param		fwdstr = { 0 };
-
 	if (fe != NULL) {
 
 		/* Forwards the Interest to next node 		*/
@@ -269,9 +295,55 @@ cefnetd_interest_forward (
 		}
 		msg[CefC_O_Fix_HopLimit] = pm->hoplimit;
 	}
-	if (hdl->access_log_f) {
-		cefnetd_interest_add_log_tag (hdl, msg, &header_len, &payload_len, pm, poh);
+	if (hdl->access_log_f && hdl->log_tag_buf != NULL) {
+		/*
+		 * msg points into the receive buffer which also holds the following
+		 * packets, so the tagged Interest is built in a separate buffer.
+		 */
+		unsigned char* tagged_msg = hdl->log_tag_buf;
+		CefT_CcnMsg_MsgBdy tagged_pm = { 0 };
+		CefT_CcnMsg_OptHdr tagged_poh = { 0 };
+		uint16_t tagged_header_len = header_len;
+		uint16_t tagged_payload_len = payload_len;
+
+		/* pm/poh of the caller keep describing the original msg */
+		if (cefnetd_packet_add_log_tag (msg, tagged_msg, &tagged_header_len, &tagged_payload_len,
+				(unsigned char*) hdl->log_tag_name,
+				(uint16_t) strlen (hdl->log_tag_name), 0)
+			&& cefnetd_packet_reparse (tagged_msg, tagged_payload_len, tagged_header_len,
+				poh, &tagged_poh, &tagged_pm, CefC_PT_INTEREST) >= 0) {
+			cefnetd_interest_forward_core (hdl, faceids, faceid_num, peer_faceid,
+				tagged_msg, tagged_payload_len, tagged_header_len,
+				&tagged_pm, &tagged_poh, pe, fe);
+			return (1);
+		}
 	}
+
+	cefnetd_interest_forward_core (hdl, faceids, faceid_num, peer_faceid,
+		msg, payload_len, header_len, pm, poh, pe, fe);
+
+	return (1);
+}
+
+/*--------------------------------------------------------------------------------------
+	Passes the Interest to the forwarding strategy
+----------------------------------------------------------------------------------------*/
+static void
+cefnetd_interest_forward_core (
+	CefT_Netd_Handle* hdl,					/* cefnetd handle							*/
+	uint16_t faceids[], 					/* Face-IDs to forward						*/
+	uint16_t faceid_num, 					/* Number of Face-IDs to forward			*/
+	int peer_faceid, 						/* Face-ID to reply to the origin of 		*/
+											/* transmission of the message(s)			*/
+	unsigned char* msg, 					/* message to forward						*/
+	uint16_t payload_len, 					/* Payload Length of this message			*/
+	uint16_t header_len,					/* Header Length of this message			*/
+	CefT_CcnMsg_MsgBdy* pm, 				/* Parsed message 							*/
+	CefT_CcnMsg_OptHdr* poh, 				/* Parsed Option Header						*/
+	CefT_Pit_Entry* pe, 					/* PIT entry matching this Interest 		*/
+	CefT_Fib_Entry* fe						/* FIB entry matching this Interest 		*/
+) {
+	CefT_FwdStrtgy_Param		fwdstr = { 0 };
 
 	if (hdl->fwd_strtgy_hdl->fwd_int) {
 
@@ -315,8 +387,6 @@ cefnetd_interest_forward (
 		/* Forwards the Interest according to Forwarding Strategy. */
 		hdl->fwd_strtgy_hdl->fwd_int(&fwdstr);
 	}
-
-	return (1);
 }
 /*--------------------------------------------------------------------------------------
 	Forwards the specified ccninfo request
@@ -417,6 +487,76 @@ cefnetd_object_forward (
 		/* Forwards the ContentObject according to Forwarding Strategy. */
 		hdl->fwd_strtgy_hdl->fwd_cob(&fwdstr);
 
+	}
+
+	return (1);
+}
+
+/*--------------------------------------------------------------------------------------
+	Forwards the specified Content Object with the Log Tag of each Face
+----------------------------------------------------------------------------------------*/
+int											/* Returns a negative value if it fails 	*/
+cefnetd_object_forward_with_log_tag (
+	CefT_Netd_Handle* hdl,					/* cefnetd handle							*/
+	uint16_t faceids[], 					/* Face-IDs to forward						*/
+	uint16_t faceid_num, 					/* Number of Face-IDs to forward			*/
+	const unsigned char* const tags[],		/* Log Tag for each Face-ID					*/
+	const uint16_t tag_lens[],				/* Length of Log Tag for each Face-ID		*/
+	unsigned char* msg, 					/* received message to handle				*/
+	uint16_t payload_len, 					/* Payload Length of this message			*/
+	uint16_t header_len,					/* Header Length of this message			*/
+	CefT_CcnMsg_MsgBdy* pm, 				/* Parsed message 							*/
+	CefT_CcnMsg_OptHdr* poh 				/* Parsed Option Header						*/
+) {
+	uint16_t group[CefC_Fib_UpFace_Max];
+	uint8_t done[CefC_Fib_UpFace_Max];
+	/*
+	 * msg points into the receive buffer which also holds the following
+	 * packets, so the tagged Object is built in a separate buffer.
+	 */
+	unsigned char* tagged_msg = hdl->log_tag_buf;
+	uint16_t i, j, group_num;
+
+	if (faceid_num > CefC_Fib_UpFace_Max) {
+		faceid_num = CefC_Fib_UpFace_Max;
+	}
+	memset (done, 0, sizeof (done));
+
+	for (i = 0; i < faceid_num; i++) {
+		CefT_CcnMsg_MsgBdy tagged_pm = { 0 };
+		CefT_CcnMsg_OptHdr tagged_poh = { 0 };
+		uint16_t tagged_header_len = header_len;
+		uint16_t tagged_payload_len = payload_len;
+		int tagged_f = 0;
+
+		if (done[i]) {
+			continue;
+		}
+
+		/* Faces which get the same Log Tag are sent together */
+		group_num = 0;
+		for (j = i; j < faceid_num; j++) {
+			if (!done[j] && tag_lens[j] == tag_lens[i] &&
+				(tag_lens[i] == 0 || memcmp (tags[j], tags[i], tag_lens[i]) == 0)) {
+				group[group_num++] = faceids[j];
+				done[j] = 1;
+			}
+		}
+
+		if (tag_lens[i] > 0 && tagged_msg != NULL) {
+			tagged_f = cefnetd_packet_add_log_tag (msg, tagged_msg,
+				&tagged_header_len, &tagged_payload_len, tags[i], tag_lens[i], 1)
+				&& cefnetd_packet_reparse (tagged_msg, tagged_payload_len, tagged_header_len,
+					poh, &tagged_poh, &tagged_pm, CefC_PT_OBJECT) >= 0;
+		}
+		if (tagged_f) {
+			/* pm/poh of the caller keep describing the original msg */
+			cefnetd_object_forward (hdl, group, group_num, tagged_msg,
+				tagged_payload_len, tagged_header_len, &tagged_pm, &tagged_poh);
+		} else {
+			cefnetd_object_forward (hdl, group, group_num, msg,
+				payload_len, header_len, pm, poh);
+		}
 	}
 
 	return (1);

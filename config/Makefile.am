@@ -27,14 +27,22 @@
 # SUCH DAMAGE.
 #
 
-EXTRA_DIST=cefnetd.conf.def cefnetd.fib.def csmgrd.conf.def plugin.conf.def default-private-key.pem default-public-key.pem ccninfo_rt-private-key.pem ccninfo_rt-public-key.pem ccninfo_user-private-key.pem ccninfo_user-public-key.pem conpubd.conf.def 88-cefore.conf.def
-CEF_CONF=cefnetd.conf cefnetd.fib csmgrd.conf plugin.conf default-private-key default-public-key ccninfo_rt-private-key ccninfo_rt-public-key ccninfo_user-private-key ccninfo_user-public-key conpubd.conf 88-cefore.conf
+EXTRA_DIST=cefnetd.conf.def cefnetd.fib.def csmgrd.conf.def plugin.conf.def log_tag.yaml.def default-private-key.pem default-public-key.pem ccninfo_rt-private-key.pem ccninfo_rt-public-key.pem ccninfo_user-private-key.pem ccninfo_user-public-key.pem conpubd.conf.def 88-cefore.conf.def
+CEF_CONF=cefnetd.conf cefnetd.fib csmgrd.conf plugin.conf log_tag.yaml default-private-key default-public-key ccninfo_rt-private-key ccninfo_rt-public-key ccninfo_user-private-key ccninfo_user-public-key conpubd.conf 88-cefore.conf
 INSTALLDIR=$(CEFORE_DIR_PATH)cefore
 CCNINFORTDIR=$(CEFORE_DIR_PATH)cefore/.ccninfo
 CCNINFOUSERDIR=$(HOME)/.ccninfo
 SYSCTLINSTALLDIR=/etc/sysctl.d
 
 default all: $(CEF_CONF)
+
+log_tag.yaml: log_tag.yaml.def
+	@if [ -f $(@:=.def) ]; then \
+		cat $(@:=.def) > $@; \
+		chmod 644 $@; \
+	else \
+		echo "*** You may need to rerun ./configure in the src directory." >&2; \
+	fi
 
 cefnetd.conf: cefnetd.conf.def
 	@if [ -f $(@:=.def) ]; then \
@@ -157,6 +165,9 @@ install:
 	fi
 	@if [ ! -f $(INSTALLDIR)/plugin.conf ]; then \
 		cp -p plugin.conf $(INSTALLDIR)/plugin.conf; \
+	fi
+	@if [ ! -f $(INSTALLDIR)/log_tag.yaml ]; then \
+		cp -p log_tag.yaml $(INSTALLDIR)/log_tag.yaml; \
 	fi
 	@if [ ! -f $(INSTALLDIR)/default-public-key ]; then \
 		cp -p default-public-key $(INSTALLDIR)/default-public-key; \

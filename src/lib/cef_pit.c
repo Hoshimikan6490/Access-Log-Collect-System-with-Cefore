@@ -646,6 +646,15 @@ cef_dbg_write (CefC_Dbg_Fine, "lookup failed, faceid=%d\n", faceid );
 		return (0);		// lookup failed
 	}
 
+	/* Keeps the Log Tag of the Interest per Down Face (the first tag wins) */
+	if (face->log_tag_len == 0 && poh && poh->log_tag_len > 0) {
+		face->log_tag_len = poh->log_tag_len;
+		if (face->log_tag_len > sizeof (face->log_tag)) {
+			face->log_tag_len = sizeof (face->log_tag);
+		}
+		memcpy (face->log_tag, poh->log_tag, face->log_tag_len);
+	}
+
 #ifdef	__PIT_DEBUG__
 cef_dbg_write (CefC_Dbg_Finer, "\t entry=%p, new_downface_f=%d (1:NEW)\n", (void*)entry, new_downface_f );
 cef_dbg_write (CefC_Dbg_Finer, "\t face->lifetime_us= "FMTU64"\n", face->lifetime_us / 1000 );
