@@ -4576,6 +4576,21 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 		}
 	}
 
+	/*
+	 * A Face whose Interest had no Log Tag may share the PIT entry with Faces whose
+	 * Interest had one, so the Data can carry a Log Tag of another Interest.  Such a Face
+	 * must not receive that Tag; it gets the Log Tag of this router (the aggregating
+	 * router) instead.
+	 */
+	if (log_tag_f && hdl->log_tag_name[0] != '\0') {
+		for (i = 0 ; i < face_num ; i++) {
+			if (face_tag_lens[i] == 0) {
+				face_tags[i] = (const unsigned char*) hdl->log_tag_name;
+				face_tag_lens[i] = (uint16_t) strlen (hdl->log_tag_name);
+			}
+		}
+	}
+
 	if (tp_plugin_res & CefC_Pi_Object_Send) {
 		if (face_num > 0) {
 #ifdef CefC_Debug
