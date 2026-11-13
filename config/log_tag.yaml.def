@@ -1,8 +1,12 @@
-# Producer LOG_TAG forwarding settings by Contents Name.
-# Set producer to true to copy the Interest LOG_TAG into the Data packet.
-# A name matches exactly (case-sensitive, chunk number ignored).
-# A name ending with "/*" matches every name under that prefix, at any depth
-# (e.g. "ccnx:/test.com/docs/*" matches ccnx:/test.com/docs/a and ccnx:/test.com/docs/a/b)
-contents:
+# LCL (Log Collection List): access-log collection settings by Contents Name.
+# Each entry has the following keys:
+#   name    : Content name to which the entry applies.
+#             A name matches exactly (case-sensitive, chunk number ignored).
+#             A name ending with "/*" matches every name under that prefix, at any depth.
+#   collect : Set to true to attach a LOG_TAG to the Data packet when this node
+#             acts as the producer (local producer face, local cache or csmgrd)
+#             for the name. Set to false to disable log collection for the name.
+
+LCL:
   - name: "ccnx:/example/content"
-    producer: false
+    collect: false

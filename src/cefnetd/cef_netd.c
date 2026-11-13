@@ -6002,7 +6002,7 @@ cefnetd_log_tag_config_read (
 						CefC_LogTag_Content_Max);
 					limit_warned = 1;
 				}
-				/* Detach from the previous entry so that its producer: line is not applied to it */
+				/* Detach from the previous entry so that its collect: line is not applied to it */
 				current = -1;
 				continue;
 			}
@@ -6038,8 +6038,8 @@ cefnetd_log_tag_config_read (
 				hdl->log_tag_contents[hdl->log_tag_content_num].wildcard = 1;
 			}
 			current = hdl->log_tag_content_num++;
-		} else if (current >= 0 && strncmp (value, "producer:", 9) == 0) {
-			value += 9;
+		} else if (current >= 0 && strncmp (value, "collect:", 8) == 0) {
+			value += 8;
 			while (*value == ' ' || *value == '\t') {
 				value++;
 			}
