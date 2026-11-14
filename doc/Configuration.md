@@ -9,6 +9,7 @@ cefnetd.conf describes the cefnetd parameter settings. The parameters must be in
 | Parameter | Description | Default |
 | - | - | - |
 | NODE_NAME     | Name of the node. <br> Specifies the name of your node in a string that can be used as a URI.| "" (null) |
+| LOG_TAG_NAME | Name used as the router identifier in access log tags (maximum 20 bytes). If empty, `NODE_NAME` is used; when `NODE_NAME` is also unset, cefnetd uses its IP address as the node name. | "" (uses `NODE_NAME`) |
 | CEF_LOG_LEVEL | Specifies the log output type for the cefnetd.<br>      Range: 0 <= n <= 3 <br> See "1.5. Logging and Debugging" for more information.| 0 |
 | PORT_NUM | Port number cefnetd uses. <br> Range: 1024 < p < 65536 <br> If the startup option "-p port_num" is used, the port number specified by the "-p port_num" option takes precedence over this parameter. See "1.1. Startup Option for Daemons and Tools" for more information | 9695 |
 | PIT_SIZE | Max number of PIT entries. <br> Range: 1 < n < 65536 | 2048 |

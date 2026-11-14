@@ -175,7 +175,6 @@
 #define CefC_T_FROM_PUB				0x000D		/* Require to get the content from the 	*/
 												/* publisher (a.k.a T_APP_FROM_PUB)		*/
 #define CefC_T_REFLEXIVE_SMI 		0x0013		/* Flag of SMI for Reflexive			*/
-#define CefC_T_LOG_TAG				0x0014		/* Log tag value for forwarded Interest	*/
 
 /*------------------------------------------------------------------*/
 /* CCNx Name Segment Types											*/
@@ -258,6 +257,7 @@
 /*----- TLVs for use in the CefC_T_OPT_ORG -----*/
 #define CefC_T_OPT_TRANSPORT		0x8004		/* Transport Plugin Variant				*/
 #define CefC_T_OPT_SEQNUM			0x8005		/* Sequence Number						*/
+#define CefC_T_LOG_TAG				0x8006		/* Log Tag (router identifier)			*/
 
 /*----- TLVs for use in the CefC_T_OPT_USER_TLV -----*/
 #define CefC_T_OPT_APP_REG			0x1001
@@ -698,6 +698,8 @@ typedef struct _CefT_CcnMsg_OptHdr_t {
 	int				tx_prio;			/* priority		*/
 	int				tx_copies;			/* copies		*/
 	int				tx_routes;			/* routes		*/
+	uint16_t		log_tag_len;
+	uchar_t			log_tag[CefC_Max_Log_Tag_Size];
 
 } CefT_CcnMsg_OptHdr;
 #define CeforeLifetime(op,n) {(op)->lifetime_f=1; (op)->lifetime=(n);}

@@ -113,6 +113,7 @@
 #define CefC_ParamName_FibSize			"FIB_SIZE"
 #define CefC_ParamName_LocalSockId		"LOCAL_SOCK_ID"
 #define CefC_ParamName_EnableAccessLog	"ENABLE_ACCESS_LOG"
+#define CefC_ParamName_LogTagName		"LOG_TAG_NAME"
 #define CefC_ParamName_PrvKey			"PRIVATE_KEY"
 #define CefC_ParamName_NbrSize			"NBR_SIZE"
 #define CefC_ParamName_NbrMngInterval	"NBR_INTERVAL"
@@ -266,6 +267,7 @@ typedef	enum	{
 
 /* Expand non-displayable characters into hexadecimal strings, so double CefC_NAME_MAXLEN */
 #define	CefC_NAME_BUFSIZ	(CefC_NAME_MAXLEN*2)
+#define	CefC_Max_Log_Tag_Size	20	/* Maximum Log Tag value size in bytes */
 
 /* Both the segment length and overall length of the name have the same upper limit. */
 #ifdef	SHA256_DIGEST_LENGTH

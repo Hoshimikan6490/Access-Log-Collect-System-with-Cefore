@@ -136,7 +136,7 @@ end
 --
 -- LOG_TAG
 --
-switch_NictVenderTLV[0x0014] = function(block, root, pInfo)
+switch_NictVenderTLV[0x8006] = function(block, root, pInfo)
    local blk_val = block.tvb(block.offset + block.typeLen + block.lengthLen, block.length)
    local treeInfo = root:add(block.tvb(block.offset, block.size),
          string.format("LOG_TAG(0x%x) Length: %d Value: %s", block.type, block.length, blk_val:string()))
@@ -2349,7 +2349,7 @@ function getNictOrgBlock(tvb, offset)
    block.offset = offset
 
    block.type,   block.typeLen   = tvb(offset+0, 2):uint(), 2
-   if block.type >= 0x2000 or block.type == 0x0014 then
+   if block.type >= 0x2000 then
      block.length, block.lengthLen = tvb(offset+2, 2):uint(), 2
    else
      block.length, block.lengthLen = 0, 0

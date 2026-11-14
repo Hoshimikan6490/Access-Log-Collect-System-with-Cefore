@@ -89,6 +89,27 @@
 #define	CefC_IsEnable_ContentStore	FALSE
 #endif
 
+#define CefC_LogTag_Content_Max	128
+
+typedef struct {
+	char	name[CefC_NAME_BUFSIZ];
+	uint8_t enabled;
+	uint8_t wildcard;		// 1: name ends with "/*" and is matched as a prefix (name keeps the trailing "/")
+	uint16_t name_len;		/* strlen (name), precomputed at config read */
+} CefT_LogTag_Content_Config;
+
+/* Builds the tagged packet in new_msg (CefC_Max_Msg_Size bytes) without modifying msg.	*/
+/* Returns 1 if tagged (use new_msg afterward), otherwise 0 (keep using msg).			*/
+/* overwrite: 0 keeps an existing non-empty tag (returns 0), 1 replaces it.			*/
+int cefnetd_packet_add_log_tag (
+	const unsigned char* msg,
+	unsigned char* new_msg,
+	uint16_t* header_len,
+	uint16_t* payload_len,
+	const unsigned char* log_tag,
+	uint16_t log_tag_len,
+	int overwrite
+);
 /*------------------------------------------------------------------*/
 /* Commands to control cefnetd										*/
 /*------------------------------------------------------------------*/
@@ -175,7 +196,12 @@ typedef struct {
 	/********** Parameters 			***********/
 	uint16_t 			port_num;				/* Port Number							*/
 	char				local_sock_id[CefC_LOCAL_SOCK_ID_SIZ + 1];
+	char				log_tag_name[CefC_Max_Log_Tag_Size + 1];
 	int				access_log_f;				/* 0:Disable 1:Enable access log		*/
+	// Scratch buffer (CefC_Max_Msg_Size bytes) in which a packet with a Log Tag is built.
+	unsigned char*	log_tag_buf;
+	uint16_t		log_tag_content_num;  /* Count of log tag contents */
+	CefT_LogTag_Content_Config log_tag_contents[CefC_LogTag_Content_Max]; /* Log tag contents */
 	uint32_t 			fib_max_size;			/* Maximum FIB entry 					*/
 	uint32_t 			pit_max_size;			/* Maximum PIT entry 					*/
 	int		 			sk_type;				/* Type of socket 						*/
@@ -427,6 +453,24 @@ cefnetd_object_forward (
 	uint16_t header_len,					/* Header Length of this message			*/
 	CefT_CcnMsg_MsgBdy* pm, 				/* Parsed message 							*/
 	CefT_CcnMsg_OptHdr* poh 				/* Parsed Option Header						*/
+);
+/*--------------------------------------------------------------------------------------
+	Forwards the specified Content Object with the Log Tag of each Face
+	tags[i] / tag_lens[i] is the Log Tag to put on the Object sent to faceids[i].
+	A Face whose tag_lens[i] is 0 gets the Object as it is.
+----------------------------------------------------------------------------------------*/
+int											/* Returns a negative value if it fails 	*/
+cefnetd_object_forward_with_log_tag (
+	CefT_Netd_Handle* hdl,
+	uint16_t faceids[],
+	uint16_t faceid_num,
+	const unsigned char* const tags[],
+	const uint16_t tag_lens[],
+	unsigned char* msg,
+	uint16_t payload_len,
+	uint16_t header_len,
+	CefT_CcnMsg_MsgBdy* pm,
+	CefT_CcnMsg_OptHdr* poh
 );
 
 /*--------------------------------------------------------------------------------------

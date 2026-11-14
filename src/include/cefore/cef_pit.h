@@ -73,6 +73,9 @@ typedef struct CefT_Down_Faces {
 	uint64_t		nonce;					/* Nonce 									*/
 	struct CefT_Down_Faces* next;			/* pointer to next Down Stream Face entry 	*/
 
+	uint16_t			log_tag_len;		/* Length of Log Tag of the Interest from this Face (0: none) */
+	unsigned char		log_tag[CefC_Max_Log_Tag_Size];	/* Log Tag of the Interest from this Face */
+
 	//0.8.3
 	uint8_t				IR_Type;			/* InterestReturn Type 						*/
 	unsigned int 		IR_len;				/* Length of IR_msg 						*/

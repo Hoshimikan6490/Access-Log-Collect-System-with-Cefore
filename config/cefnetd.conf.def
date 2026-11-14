@@ -8,6 +8,10 @@
 #
 #NODE_NAME=""
 
+# Access log tag name. If empty, NODE_NAME is used (or the node IP address
+# when NODE_NAME is not configured).
+#LOG_TAG_NAME=""
+
 # Operational Log Level
 #  0: Error only
 #  1: Warning and Error
