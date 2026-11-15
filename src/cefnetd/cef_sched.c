@@ -693,16 +693,29 @@ cefnetd_object_forward_without_log_tag (
 	uint16_t stripped_header_len = header_len;
 	uint16_t stripped_payload_len = payload_len;
 
-	if (stripped_msg != NULL
-		&& cefnetd_packet_remove_log_tag (msg, stripped_msg,
-			&stripped_header_len, &stripped_payload_len)
-		&& cefnetd_packet_reparse (stripped_msg, stripped_payload_len, stripped_header_len,
-			poh, &stripped_poh, &stripped_pm, CefC_PT_OBJECT) >= 0) {
-		/* pm/poh of the caller keep describing the original msg */
-		return (cefnetd_object_forward (hdl, faceids, faceid_num, stripped_msg,
-			stripped_payload_len, stripped_header_len, &stripped_pm, &stripped_poh));
+	if (stripped_msg == NULL) {
+		/* Never forward the tagged Object when the tag cannot be removed */
+		cef_log_write (CefC_Log_Error,
+			"Dropped the Content Object: no buffer to remove the Log Tag\n");
+		return (-1);
 	}
 
-	return (cefnetd_object_forward (hdl, faceids, faceid_num, msg,
-		payload_len, header_len, pm, poh));
+	if (!cefnetd_packet_remove_log_tag (msg, stripped_msg,
+			&stripped_header_len, &stripped_payload_len)) {
+		/* The Object carries no Log Tag, so there is nothing to remove */
+		return (cefnetd_object_forward (hdl, faceids, faceid_num, msg,
+			payload_len, header_len, pm, poh));
+	}
+
+	if (cefnetd_packet_reparse (stripped_msg, stripped_payload_len, stripped_header_len,
+			poh, &stripped_poh, &stripped_pm, CefC_PT_OBJECT) < 0) {
+		/* Never forward the tagged Object when the stripped one is unusable */
+		cef_log_write (CefC_Log_Error,
+			"Dropped the Content Object: failed to parse it after removing the Log Tag\n");
+		return (-1);
+	}
+
+	/* pm/poh of the caller keep describing the original msg */
+	return (cefnetd_object_forward (hdl, faceids, faceid_num, stripped_msg,
+		stripped_payload_len, stripped_header_len, &stripped_pm, &stripped_poh));
 }
