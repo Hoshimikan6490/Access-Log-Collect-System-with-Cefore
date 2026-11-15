@@ -288,9 +288,12 @@ cefnetd_packet_remove_log_tag (
 	int has_log_tag = 0;
 	int has_own_torg = 0;
 
-	/* find the T-ORG TLV of NICT */
+	/*
+	 * Find the LOG_TAG TLV in the T-ORG TLVs of NICT.  There may be more than one
+	 * NICT T-ORG TLV, so all of them are searched until a LOG_TAG TLV is found.
+	 */
 	index = CefC_S_Fix_Header;
-	while (index + CefC_S_TLF <= *header_len) {
+	while (!has_log_tag && index + CefC_S_TLF <= *header_len) {
 		uint16_t torg_len;
 		rd_hdr = (const struct tlv_hdr*) &msg[index];
 		torg_len = ntohs (rd_hdr->length);
@@ -300,37 +303,30 @@ cefnetd_packet_remove_log_tag (
 		if (ntohs (rd_hdr->type) == CefC_T_OPT_ORG
 			&& torg_len >= pen_len
 			&& memcmp (&msg[index + CefC_S_TLF], pen, pen_len) == 0) {
-			torg_pos = index;
-			old_torg_len = torg_len;
-			has_own_torg = 1;
-			break;
+			uint16_t org_value_pos = index + CefC_S_TLF + pen_len;
+			uint16_t org_value_len = torg_len - pen_len;
+			uint16_t sub_index = 0;
+
+			while (sub_index + CefC_S_TLF <= org_value_len) {
+				uint16_t sub_len;
+				rd_hdr = (const struct tlv_hdr*) &msg[org_value_pos + sub_index];
+				sub_len = ntohs (rd_hdr->length);
+				if (sub_len > org_value_len - sub_index - CefC_S_TLF) {
+					break;
+				}
+				if (ntohs (rd_hdr->type) == CefC_T_LOG_TAG) {
+					torg_pos = index;
+					old_torg_len = torg_len;
+					log_tag_pos = org_value_pos + sub_index;
+					old_log_tag_len = sub_len;
+					has_own_torg = 1;
+					has_log_tag = 1;
+					break;
+				}
+				sub_index += CefC_S_TLF + sub_len;
+			}
 		}
 		index += CefC_S_TLF + torg_len;
-	}
-	if (!has_own_torg) {
-		return (0);
-	}
-
-	/* find the LOG_TAG TLV in it */
-	{
-		uint16_t org_value_pos = torg_pos + CefC_S_TLF + pen_len;
-		uint16_t org_value_len = old_torg_len - pen_len;
-		index = 0;
-		while (index + CefC_S_TLF <= org_value_len) {
-			uint16_t sub_len;
-			rd_hdr = (const struct tlv_hdr*) &msg[org_value_pos + index];
-			sub_len = ntohs (rd_hdr->length);
-			if (sub_len > org_value_len - index - CefC_S_TLF) {
-				break;
-			}
-			if (ntohs (rd_hdr->type) == CefC_T_LOG_TAG) {
-				log_tag_pos = org_value_pos + index;
-				old_log_tag_len = sub_len;
-				has_log_tag = 1;
-				break;
-			}
-			index += CefC_S_TLF + sub_len;
-		}
 	}
 	if (!has_log_tag) {
 		return (0);
