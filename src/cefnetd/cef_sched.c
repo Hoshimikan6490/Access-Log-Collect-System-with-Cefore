@@ -109,6 +109,78 @@ cefnetd_packet_reparse (
 
 /****************************************************************************************
  ****************************************************************************************/
+#define CefC_NictTag_NoTorg		0		/* no T-ORG TLV of NICT						*/
+#define CefC_NictTag_TorgOnly	1		/* T-ORG TLV of NICT without LOG_TAG TLV	*/
+#define CefC_NictTag_Found		2		/* LOG_TAG TLV found						*/
+
+/*
+ * Searches the hop-by-hop header of msg for the LOG_TAG TLV inside the T-ORG TLV(s)
+ * of NICT.  There may be more than one NICT T-ORG TLV, so all of them are searched
+ * until a LOG_TAG TLV is found.  The positions are offsets from the head of msg.
+ * Returns CefC_NictTag_Found: torg_pos/torg_len describe the T-ORG TLV holding the
+ *                             tag, tag_pos/tag_len the LOG_TAG TLV (value length).
+ *         CefC_NictTag_TorgOnly: torg_pos/torg_len describe the first NICT T-ORG TLV.
+ *         CefC_NictTag_NoTorg: nothing is set.
+ */
+static int
+cefnetd_nict_log_tag_find (
+	const unsigned char* msg,
+	uint16_t header_len,
+	uint16_t* torg_pos,
+	uint16_t* torg_len,
+	uint16_t* tag_pos,
+	uint16_t* tag_len
+) {
+	const uint16_t pen_len = 3;
+	const unsigned char pen[] = {
+		(CefC_NICT_PEN >> 16) & 0xff,
+		(CefC_NICT_PEN >> 8) & 0xff,
+		CefC_NICT_PEN & 0xff
+	};
+	int res = CefC_NictTag_NoTorg;
+	uint16_t index = CefC_S_Fix_Header;
+
+	while (index + CefC_S_TLF <= header_len) {
+		const struct tlv_hdr* rd_hdr = (const struct tlv_hdr*) &msg[index];
+		uint16_t len = ntohs (rd_hdr->length);
+
+		if (len > header_len - index - CefC_S_TLF) {
+			break;
+		}
+		if (ntohs (rd_hdr->type) == CefC_T_OPT_ORG
+			&& len >= pen_len
+			&& memcmp (&msg[index + CefC_S_TLF], pen, pen_len) == 0) {
+			uint16_t org_value_pos = index + CefC_S_TLF + pen_len;
+			uint16_t org_value_len = len - pen_len;
+			uint16_t sub_index = 0;
+
+			if (res == CefC_NictTag_NoTorg) {
+				*torg_pos = index;
+				*torg_len = len;
+				res = CefC_NictTag_TorgOnly;
+			}
+			while (sub_index + CefC_S_TLF <= org_value_len) {
+				uint16_t sub_len;
+				rd_hdr = (const struct tlv_hdr*) &msg[org_value_pos + sub_index];
+				sub_len = ntohs (rd_hdr->length);
+				if (sub_len > org_value_len - sub_index - CefC_S_TLF) {
+					break;
+				}
+				if (ntohs (rd_hdr->type) == CefC_T_LOG_TAG) {
+					*torg_pos = index;
+					*torg_len = len;
+					*tag_pos = org_value_pos + sub_index;
+					*tag_len = sub_len;
+					return (CefC_NictTag_Found);
+				}
+				sub_index += CefC_S_TLF + sub_len;
+			}
+		}
+		index += CefC_S_TLF + len;
+	}
+	return (res);
+}
+
 /*
  * Builds a copy of msg with the LOG_TAG TLV added into new_msg.
  * msg is never modified, because it usually lives in the per-face receive buffer
@@ -129,7 +201,6 @@ cefnetd_packet_add_log_tag (
 ) {
 	const struct fixed_hdr* in_hdr = (const struct fixed_hdr*) msg;
 	struct fixed_hdr* fix_hdr;
-	const struct tlv_hdr* rd_hdr;
 	struct tlv_hdr* tlv_hdr;
 	const uint16_t pen_len = 3;
 	const unsigned char pen[] = {
@@ -138,6 +209,7 @@ cefnetd_packet_add_log_tag (
 		CefC_NICT_PEN & 0xff
 	};
 	uint16_t add_len = CefC_S_TLF + log_tag_len;
+	int found;
 	uint16_t old_torg_len = 0;
 	uint16_t torg_pos = 0;
 	uint16_t log_tag_pos = 0;
@@ -157,48 +229,14 @@ cefnetd_packet_add_log_tag (
 		return (0);
 	}
 
-  // check if the message has its own T-ORG TLV
-	index = CefC_S_Fix_Header;
-	while (index + CefC_S_TLF <= *header_len) {
-		uint16_t torg_len;
-		rd_hdr = (const struct tlv_hdr*) &msg[index];
-		torg_len = ntohs (rd_hdr->length);
-		if (torg_len > *header_len - index - CefC_S_TLF) {
-			break;
-		}
-		if (ntohs (rd_hdr->type) == CefC_T_OPT_ORG
-			&& torg_len >= pen_len
-			&& memcmp (&msg[index + CefC_S_TLF], pen, pen_len) == 0) {
-			torg_pos = index;
-			old_torg_len = torg_len;
-			has_own_torg = 1;
-			break;
-		}
-		index += CefC_S_TLF + torg_len;
-	}
-	if (has_own_torg) {
-		uint16_t org_value_pos = torg_pos + CefC_S_TLF + pen_len;
-		uint16_t org_value_len = old_torg_len - pen_len;
-		index = 0;
-		while (index + CefC_S_TLF <= org_value_len) {
-			uint16_t sub_len;
-			rd_hdr = (const struct tlv_hdr*) &msg[org_value_pos + index];
-			sub_len = ntohs (rd_hdr->length);
-			if (sub_len > org_value_len - index - CefC_S_TLF) {
-				break;
-			}
-			if (ntohs (rd_hdr->type) == CefC_T_LOG_TAG) {
-				/* An existing non-empty tag is kept unless the caller asks to replace it */
-				if (sub_len > 0 && !overwrite) {
-					return (0);
-				}
-				log_tag_pos = org_value_pos + index;
-				old_log_tag_len = sub_len;
-				has_log_tag = 1;
-				break;
-			}
-			index += CefC_S_TLF + sub_len;
-		}
+  // check if the message has its own T-ORG TLV and a LOG_TAG TLV in it
+	found = cefnetd_nict_log_tag_find (msg, *header_len,
+				&torg_pos, &old_torg_len, &log_tag_pos, &old_log_tag_len);
+	has_own_torg = (found != CefC_NictTag_NoTorg);
+	has_log_tag = (found == CefC_NictTag_Found);
+	/* An existing non-empty tag is kept unless the caller asks to replace it */
+	if (has_log_tag && old_log_tag_len > 0 && !overwrite) {
+		return (0);
 	}
 
   // check if the message has enough space to add LOG_TAG TLV
@@ -269,66 +307,18 @@ cefnetd_packet_remove_log_tag (
 ) {
 	const struct fixed_hdr* in_hdr = (const struct fixed_hdr*) msg;
 	struct fixed_hdr* fix_hdr;
-	const struct tlv_hdr* rd_hdr;
 	struct tlv_hdr* tlv_hdr;
 	const uint16_t pen_len = 3;
-	const unsigned char pen[] = {
-		(CefC_NICT_PEN >> 16) & 0xff,
-		(CefC_NICT_PEN >> 8) & 0xff,
-		CefC_NICT_PEN & 0xff
-	};
 	uint16_t old_torg_len = 0;
 	uint16_t torg_pos = 0;
 	uint16_t log_tag_pos = 0;
 	uint16_t old_log_tag_len = 0;
-	uint16_t index;
 	uint16_t packet_len;
 	uint16_t cut_pos;
 	uint16_t cut_len;
-	int has_log_tag = 0;
-	int has_own_torg = 0;
 
-	/*
-	 * Find the LOG_TAG TLV in the T-ORG TLVs of NICT.  There may be more than one
-	 * NICT T-ORG TLV, so all of them are searched until a LOG_TAG TLV is found.
-	 */
-	index = CefC_S_Fix_Header;
-	while (!has_log_tag && index + CefC_S_TLF <= *header_len) {
-		uint16_t torg_len;
-		rd_hdr = (const struct tlv_hdr*) &msg[index];
-		torg_len = ntohs (rd_hdr->length);
-		if (torg_len > *header_len - index - CefC_S_TLF) {
-			break;
-		}
-		if (ntohs (rd_hdr->type) == CefC_T_OPT_ORG
-			&& torg_len >= pen_len
-			&& memcmp (&msg[index + CefC_S_TLF], pen, pen_len) == 0) {
-			uint16_t org_value_pos = index + CefC_S_TLF + pen_len;
-			uint16_t org_value_len = torg_len - pen_len;
-			uint16_t sub_index = 0;
-
-			while (sub_index + CefC_S_TLF <= org_value_len) {
-				uint16_t sub_len;
-				rd_hdr = (const struct tlv_hdr*) &msg[org_value_pos + sub_index];
-				sub_len = ntohs (rd_hdr->length);
-				if (sub_len > org_value_len - sub_index - CefC_S_TLF) {
-					break;
-				}
-				if (ntohs (rd_hdr->type) == CefC_T_LOG_TAG) {
-					torg_pos = index;
-					old_torg_len = torg_len;
-					log_tag_pos = org_value_pos + sub_index;
-					old_log_tag_len = sub_len;
-					has_own_torg = 1;
-					has_log_tag = 1;
-					break;
-				}
-				sub_index += CefC_S_TLF + sub_len;
-			}
-		}
-		index += CefC_S_TLF + torg_len;
-	}
-	if (!has_log_tag) {
+	if (cefnetd_nict_log_tag_find (msg, *header_len,
+			&torg_pos, &old_torg_len, &log_tag_pos, &old_log_tag_len) != CefC_NictTag_Found) {
 		return (0);
 	}
 
