@@ -251,6 +251,113 @@ cefnetd_packet_add_log_tag (
 	return (1);
 }
 
+/*
+ * Builds a copy of msg without the LOG_TAG TLV into new_msg.
+ * msg is never modified.  new_msg must hold CefC_Max_Msg_Size bytes and must not
+ * overlap msg.  If the NICT T-ORG TLV holds nothing but the LOG_TAG TLV, the whole
+ * T-ORG TLV is removed.
+ * Returns 1 if the tag was removed (the packet is in new_msg and header_len is updated),
+ * otherwise 0 (msg has no LOG_TAG TLV; new_msg is not valid).
+ */
+int
+cefnetd_packet_remove_log_tag (
+	const unsigned char* msg,
+	unsigned char* new_msg,
+	uint16_t* header_len,
+	uint16_t* payload_len
+) {
+	const struct fixed_hdr* in_hdr = (const struct fixed_hdr*) msg;
+	struct fixed_hdr* fix_hdr;
+	const struct tlv_hdr* rd_hdr;
+	struct tlv_hdr* tlv_hdr;
+	const uint16_t pen_len = 3;
+	const unsigned char pen[] = {
+		(CefC_NICT_PEN >> 16) & 0xff,
+		(CefC_NICT_PEN >> 8) & 0xff,
+		CefC_NICT_PEN & 0xff
+	};
+	uint16_t old_torg_len = 0;
+	uint16_t torg_pos = 0;
+	uint16_t log_tag_pos = 0;
+	uint16_t old_log_tag_len = 0;
+	uint16_t index;
+	uint16_t packet_len;
+	uint16_t cut_pos;
+	uint16_t cut_len;
+	int has_log_tag = 0;
+	int has_own_torg = 0;
+
+	/* find the T-ORG TLV of NICT */
+	index = CefC_S_Fix_Header;
+	while (index + CefC_S_TLF <= *header_len) {
+		uint16_t torg_len;
+		rd_hdr = (const struct tlv_hdr*) &msg[index];
+		torg_len = ntohs (rd_hdr->length);
+		if (torg_len > *header_len - index - CefC_S_TLF) {
+			break;
+		}
+		if (ntohs (rd_hdr->type) == CefC_T_OPT_ORG
+			&& torg_len >= pen_len
+			&& memcmp (&msg[index + CefC_S_TLF], pen, pen_len) == 0) {
+			torg_pos = index;
+			old_torg_len = torg_len;
+			has_own_torg = 1;
+			break;
+		}
+		index += CefC_S_TLF + torg_len;
+	}
+	if (!has_own_torg) {
+		return (0);
+	}
+
+	/* find the LOG_TAG TLV in it */
+	{
+		uint16_t org_value_pos = torg_pos + CefC_S_TLF + pen_len;
+		uint16_t org_value_len = old_torg_len - pen_len;
+		index = 0;
+		while (index + CefC_S_TLF <= org_value_len) {
+			uint16_t sub_len;
+			rd_hdr = (const struct tlv_hdr*) &msg[org_value_pos + index];
+			sub_len = ntohs (rd_hdr->length);
+			if (sub_len > org_value_len - index - CefC_S_TLF) {
+				break;
+			}
+			if (ntohs (rd_hdr->type) == CefC_T_LOG_TAG) {
+				log_tag_pos = org_value_pos + index;
+				old_log_tag_len = sub_len;
+				has_log_tag = 1;
+				break;
+			}
+			index += CefC_S_TLF + sub_len;
+		}
+	}
+	if (!has_log_tag) {
+		return (0);
+	}
+
+	if (old_torg_len == pen_len + CefC_S_TLF + old_log_tag_len) {
+		/* The T-ORG TLV holds only the LOG_TAG TLV, so it is removed as a whole */
+		cut_pos = torg_pos;
+		cut_len = CefC_S_TLF + old_torg_len;
+	} else {
+		cut_pos = log_tag_pos;
+		cut_len = CefC_S_TLF + old_log_tag_len;
+	}
+
+	packet_len = ntohs (in_hdr->pkt_len);
+	memcpy (new_msg, msg, cut_pos);
+	memcpy (&new_msg[cut_pos], &msg[cut_pos + cut_len], packet_len - cut_pos - cut_len);
+	if (cut_pos == log_tag_pos) {
+		tlv_hdr = (struct tlv_hdr*) &new_msg[torg_pos];
+		tlv_hdr->length = htons (old_torg_len - cut_len);
+	}
+	*header_len -= cut_len;
+	fix_hdr = (struct fixed_hdr*) new_msg;
+	fix_hdr->hdr_len = (uint8_t) *header_len;
+	fix_hdr->pkt_len = htons (*header_len + *payload_len);
+	return (1);
+}
+
 /*--------------------------------------------------------------------------------------
 	Forwards the specified Interest
 ----------------------------------------------------------------------------------------*/
@@ -560,4 +667,42 @@ cefnetd_object_forward_with_log_tag (
 	}
 
 	return (1);
+}
+
+/*--------------------------------------------------------------------------------------
+	Forwards the specified Content Object after removing its Log Tag
+----------------------------------------------------------------------------------------*/
+int											/* Returns a negative value if it fails 	*/
+cefnetd_object_forward_without_log_tag (
+	CefT_Netd_Handle* hdl,					/* cefnetd handle							*/
+	uint16_t faceids[], 					/* Face-IDs to forward						*/
+	uint16_t faceid_num, 					/* Number of Face-IDs to forward			*/
+	unsigned char* msg, 					/* received message to handle				*/
+	uint16_t payload_len, 					/* Payload Length of this message			*/
+	uint16_t header_len,					/* Header Length of this message			*/
+	CefT_CcnMsg_MsgBdy* pm, 				/* Parsed message 							*/
+	CefT_CcnMsg_OptHdr* poh 				/* Parsed Option Header						*/
+) {
+	/*
+	 * msg points into the receive buffer (or the cache entry), so the stripped
+	 * Object is built in a separate buffer.
+	 */
+	unsigned char* stripped_msg = hdl->log_tag_buf;
+	CefT_CcnMsg_MsgBdy stripped_pm = { 0 };
+	CefT_CcnMsg_OptHdr stripped_poh = { 0 };
+	uint16_t stripped_header_len = header_len;
+	uint16_t stripped_payload_len = payload_len;
+
+	if (stripped_msg != NULL
+		&& cefnetd_packet_remove_log_tag (msg, stripped_msg,
+			&stripped_header_len, &stripped_payload_len)
+		&& cefnetd_packet_reparse (stripped_msg, stripped_payload_len, stripped_header_len,
+			poh, &stripped_poh, &stripped_pm, CefC_PT_OBJECT) >= 0) {
+		/* pm/poh of the caller keep describing the original msg */
+		return (cefnetd_object_forward (hdl, faceids, faceid_num, stripped_msg,
+			stripped_payload_len, stripped_header_len, &stripped_pm, &stripped_poh));
+	}
+
+	return (cefnetd_object_forward (hdl, faceids, faceid_num, msg,
+		payload_len, header_len, pm, poh));
 }
