@@ -6070,10 +6070,12 @@ cefnetd_log_tag_config_read (
 
 /*
  * Looks up the name of pm in log_tag.yaml.
- * When several entries match, an exact name wins over a wildcard name, and
- * "collect: true" wins over "collect: false" among entries of the same kind.
+ * When several entries match, an exact name wins over a wildcard name, the longest
+ * wildcard prefix wins among wildcards, and "collect: true" wins over
+ * "collect: false" only when the specificity is the same.
  */
-static int									/* CefC_LogTag_NoMatch / _Enabled / _Disabled */
+#define CefC_LogTag_ExactScore	0x100000	/* larger than any wildcard score */
+static int								/* CefC_LogTag_NoMatch / _Enabled / _Disabled */
 cefnetd_log_tag_lookup (
 	CefT_Netd_Handle* hdl,
 	CefT_CcnMsg_MsgBdy* pm
@@ -6083,7 +6085,7 @@ cefnetd_log_tag_lookup (
 	 */
 	char uri[CefC_NAME_BUFSIZ + 16];
 	uint16_t i;
-	int best_score = 0;						/* 0: none, 1: wildcard, 2: exact */
+	int best_score = 0;						/* 0: none, wildcard: 1 + prefix length, exact: max */
 	int best_result = CefC_LogTag_NoMatch;
 
 	if (hdl->log_tag_content_num == 0 || pm->name_len > CefC_NAME_MAXLEN) {
@@ -6101,12 +6103,13 @@ cefnetd_log_tag_lookup (
 					hdl->log_tag_contents[i].name_len) != 0) {
 				continue;
 			}
-			score = 1;
+			/* the longer (more specific) prefix wins */
+			score = 1 + (int) hdl->log_tag_contents[i].name_len;
 		} else {
 			if (strcmp (hdl->log_tag_contents[i].name, uri) != 0) {
 				continue;
 			}
-			score = 2;
+			score = CefC_LogTag_ExactScore;
 		}
 		result = hdl->log_tag_contents[i].enabled ?
 					CefC_LogTag_Enabled : CefC_LogTag_Disabled;
