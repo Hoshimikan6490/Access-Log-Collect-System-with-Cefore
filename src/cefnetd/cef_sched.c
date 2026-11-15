@@ -257,7 +257,8 @@ cefnetd_packet_add_log_tag (
  * overlap msg.  If the NICT T-ORG TLV holds nothing but the LOG_TAG TLV, the whole
  * T-ORG TLV is removed.
  * Returns 1 if the tag was removed (the packet is in new_msg and header_len is updated),
- * otherwise 0 (msg has no LOG_TAG TLV; new_msg is not valid).
+ * 0 if msg has no LOG_TAG TLV (new_msg is not valid),
+ * or -1 if the lengths are inconsistent or too large (new_msg is not valid).
  */
 int
 cefnetd_packet_remove_log_tag (
@@ -344,7 +345,13 @@ cefnetd_packet_remove_log_tag (
 		cut_len = CefC_S_TLF + old_log_tag_len;
 	}
 
-	packet_len = ntohs (in_hdr->pkt_len);
+	/* The copy length comes from the lengths the caller passed, not from the packet */
+	packet_len = *header_len + *payload_len;
+	if ((uint32_t) *header_len + *payload_len > CefC_Max_Msg_Size
+		|| ntohs (in_hdr->pkt_len) != packet_len
+		|| (uint32_t) cut_pos + cut_len > *header_len) {
+		return (-1);
+	}
 	memcpy (new_msg, msg, cut_pos);
 	memcpy (&new_msg[cut_pos], &msg[cut_pos + cut_len], packet_len - cut_pos - cut_len);
 	if (cut_pos == log_tag_pos) {
@@ -692,6 +699,7 @@ cefnetd_object_forward_without_log_tag (
 	CefT_CcnMsg_OptHdr stripped_poh = { 0 };
 	uint16_t stripped_header_len = header_len;
 	uint16_t stripped_payload_len = payload_len;
+	int remove_res;
 
 	if (stripped_msg == NULL) {
 		/* Never forward the tagged Object when the tag cannot be removed */
@@ -700,8 +708,14 @@ cefnetd_object_forward_without_log_tag (
 		return (-1);
 	}
 
-	if (!cefnetd_packet_remove_log_tag (msg, stripped_msg,
-			&stripped_header_len, &stripped_payload_len)) {
+	remove_res = cefnetd_packet_remove_log_tag (msg, stripped_msg,
+			&stripped_header_len, &stripped_payload_len);
+	if (remove_res < 0) {
+		cef_log_write (CefC_Log_Error,
+			"Dropped the Content Object: inconsistent packet length while removing the Log Tag\n");
+		return (-1);
+	}
+	if (remove_res == 0) {
 		/* The Object carries no Log Tag, so there is nothing to remove */
 		return (cefnetd_object_forward (hdl, faceids, faceid_num, msg,
 			payload_len, header_len, pm, poh));
