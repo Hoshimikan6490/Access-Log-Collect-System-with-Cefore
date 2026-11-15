@@ -110,6 +110,15 @@ int cefnetd_packet_add_log_tag (
 	uint16_t log_tag_len,
 	int overwrite
 );
+/* Builds the packet without the Log Tag in new_msg (CefC_Max_Msg_Size bytes) without	*/
+/* modifying msg.  Returns 1 if the tag was removed (use new_msg afterward),			*/
+/* otherwise 0 (msg has no Log Tag; keep using msg).									*/
+int cefnetd_packet_remove_log_tag (
+	const unsigned char* msg,
+	unsigned char* new_msg,
+	uint16_t* header_len,
+	uint16_t* payload_len
+);
 /*------------------------------------------------------------------*/
 /* Commands to control cefnetd										*/
 /*------------------------------------------------------------------*/
@@ -466,6 +475,21 @@ cefnetd_object_forward_with_log_tag (
 	uint16_t faceid_num,
 	const unsigned char* const tags[],
 	const uint16_t tag_lens[],
+	unsigned char* msg,
+	uint16_t payload_len,
+	uint16_t header_len,
+	CefT_CcnMsg_MsgBdy* pm,
+	CefT_CcnMsg_OptHdr* poh
+);
+/*--------------------------------------------------------------------------------------
+	Forwards the specified Content Object after removing its Log Tag
+	(the Object is forwarded as it is if it has no Log Tag)
+----------------------------------------------------------------------------------------*/
+int											/* Returns a negative value if it fails 	*/
+cefnetd_object_forward_without_log_tag (
+	CefT_Netd_Handle* hdl,
+	uint16_t faceids[],
+	uint16_t faceid_num,
 	unsigned char* msg,
 	uint16_t payload_len,
 	uint16_t header_len,
