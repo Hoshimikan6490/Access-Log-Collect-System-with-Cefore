@@ -68,8 +68,9 @@ cefnetd_LDADD+=-ldl
 
 cefnetd_CFLAGS=$(CEF_NETD_CFLAGS)
 cefnetd_SOURCES=cef_main.c cef_node.c cef_sched.c cef_netd.c \
+				cef_access_log.c \
 				cef_status.c cef_forward.c cefnet_fib.c \
-				cef_netd.h cef_status.h
+				cef_netd.h cef_status.h cef_access_log.h
 
 
 # check conpub

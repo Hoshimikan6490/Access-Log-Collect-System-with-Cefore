@@ -174,6 +174,7 @@ cefctrl_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
 am_cefnetd_OBJECTS = cefnetd-cef_main.$(OBJEXT) \
 	cefnetd-cef_node.$(OBJEXT) cefnetd-cef_sched.$(OBJEXT) \
 	cefnetd-cef_netd.$(OBJEXT) cefnetd-cef_status.$(OBJEXT) \
+	cefnetd-cef_access_log.$(OBJEXT) \
 	cefnetd-cef_forward.$(OBJEXT) cefnetd-cefnet_fib.$(OBJEXT)
 cefnetd_OBJECTS = $(am_cefnetd_OBJECTS)
 cefnetd_DEPENDENCIES = $(am__DEPENDENCIES_1) $(am__DEPENDENCIES_1)
@@ -196,6 +197,7 @@ DEFAULT_INCLUDES = -I.@am__isrc@ -I$(top_builddir)
 depcomp = $(SHELL) $(top_srcdir)/autotools/depcomp
 am__maybe_remake_depfiles = depfiles
 am__depfiles_remade = ./$(DEPDIR)/cefctrl-cef_ctrl.Po \
+	./$(DEPDIR)/cefnetd-cef_access_log.Po \
 	./$(DEPDIR)/cefnetd-cef_forward.Po \
 	./$(DEPDIR)/cefnetd-cef_main.Po \
 	./$(DEPDIR)/cefnetd-cef_netd.Po \
@@ -383,8 +385,9 @@ cefnetd_LDADD = -lcef_plugin -lcefnetd_fwd_plugin -lcefore \
 	$(am__append_5) $(am__append_6) -ldl
 cefnetd_CFLAGS = $(CEF_NETD_CFLAGS)
 cefnetd_SOURCES = cef_main.c cef_node.c cef_sched.c cef_netd.c \
+				cef_access_log.c \
 				cef_status.c cef_forward.c cefnet_fib.c \
-				cef_netd.h cef_status.h
+				cef_netd.h cef_status.h cef_access_log.h
 
 
 # set cefctrl option
@@ -492,6 +495,7 @@ distclean-compile:
 
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cefctrl-cef_ctrl.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cefnetd-cef_forward.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cefnetd-cef_access_log.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cefnetd-cef_main.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cefnetd-cef_netd.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cefnetd-cef_node.Po@am__quote@ # am--include-marker
@@ -567,6 +571,20 @@ cefnetd-cef_node.obj: cef_node.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='cef_node.c' object='cefnetd-cef_node.obj' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(cefnetd_CFLAGS) $(CFLAGS) -c -o cefnetd-cef_node.obj `if test -f 'cef_node.c'; then $(CYGPATH_W) 'cef_node.c'; else $(CYGPATH_W) '$(srcdir)/cef_node.c'; fi`
+
+cefnetd-cef_access_log.o: cef_access_log.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(cefnetd_CFLAGS) $(CFLAGS) -MT cefnetd-cef_access_log.o -MD -MP -MF $(DEPDIR)/cefnetd-cef_access_log.Tpo -c -o cefnetd-cef_access_log.o `test -f 'cef_access_log.c' || echo '$(srcdir)/'`cef_access_log.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/cefnetd-cef_access_log.Tpo $(DEPDIR)/cefnetd-cef_access_log.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='cef_access_log.c' object='cefnetd-cef_access_log.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(cefnetd_CFLAGS) $(CFLAGS) -c -o cefnetd-cef_access_log.o `test -f 'cef_access_log.c' || echo '$(srcdir)/'`cef_access_log.c
+
+cefnetd-cef_access_log.obj: cef_access_log.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(cefnetd_CFLAGS) $(CFLAGS) -MT cefnetd-cef_access_log.obj -MD -MP -MF $(DEPDIR)/cefnetd-cef_access_log.Tpo -c -o cefnetd-cef_access_log.obj `if test -f 'cef_access_log.c'; then $(CYGPATH_W) 'cef_access_log.c'; else $(CYGPATH_W) '$(srcdir)/cef_access_log.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/cefnetd-cef_access_log.Tpo $(DEPDIR)/cefnetd-cef_access_log.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='cef_access_log.c' object='cefnetd-cef_access_log.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(cefnetd_CFLAGS) $(CFLAGS) -c -o cefnetd-cef_access_log.obj `if test -f 'cef_access_log.c'; then $(CYGPATH_W) 'cef_access_log.c'; else $(CYGPATH_W) '$(srcdir)/cef_access_log.c'; fi`
 
 cefnetd-cef_sched.o: cef_sched.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(cefnetd_CFLAGS) $(CFLAGS) -MT cefnetd-cef_sched.o -MD -MP -MF $(DEPDIR)/cefnetd-cef_sched.Tpo -c -o cefnetd-cef_sched.o `test -f 'cef_sched.c' || echo '$(srcdir)/'`cef_sched.c
@@ -771,6 +789,7 @@ clean-am: clean-binPROGRAMS clean-generic clean-libtool mostlyclean-am
 
 distclean: distclean-am
 		-rm -f ./$(DEPDIR)/cefctrl-cef_ctrl.Po
+	-rm -f ./$(DEPDIR)/cefnetd-cef_access_log.Po
 	-rm -f ./$(DEPDIR)/cefnetd-cef_forward.Po
 	-rm -f ./$(DEPDIR)/cefnetd-cef_main.Po
 	-rm -f ./$(DEPDIR)/cefnetd-cef_netd.Po
@@ -825,6 +844,7 @@ installcheck-am:
 
 maintainer-clean: maintainer-clean-am
 		-rm -f ./$(DEPDIR)/cefctrl-cef_ctrl.Po
+	-rm -f ./$(DEPDIR)/cefnetd-cef_access_log.Po
 	-rm -f ./$(DEPDIR)/cefnetd-cef_forward.Po
 	-rm -f ./$(DEPDIR)/cefnetd-cef_main.Po
 	-rm -f ./$(DEPDIR)/cefnetd-cef_netd.Po

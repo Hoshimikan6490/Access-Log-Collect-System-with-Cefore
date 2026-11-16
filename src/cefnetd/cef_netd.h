@@ -68,6 +68,7 @@
 #include <cefore/cef_valid.h>
 #include <cefore/cef_log.h>
 #include <cefore/cef_pthread.h>
+#include "cef_access_log.h"
 
 #include <cefore/cef_ccninfo.h>
 
@@ -209,6 +210,11 @@ typedef struct {
 	int				access_log_f;				/* 0:Disable 1:Enable access log		*/
 	// Scratch buffer (CefC_Max_Msg_Size bytes) in which a packet with a Log Tag is built.
 	unsigned char*	log_tag_buf;
+	/* Access log buffer (NULL if ENABLE_ACCESS_LOG is 0) */
+	CefT_AccessLog*	access_log;
+	uint32_t		access_log_buf_size;		/* Entries per buffer					*/
+	uint32_t		access_log_name_max;		/* Max bytes of a stored Name			*/
+	uint32_t		access_log_swap_pct;		/* Usage (%) which triggers a swap		*/
 	uint16_t		log_tag_content_num;  /* Count of log tag contents */
 	CefT_LogTag_Content_Config log_tag_contents[CefC_LogTag_Content_Max]; /* Log tag contents */
 	uint32_t 			fib_max_size;			/* Maximum FIB entry 					*/
