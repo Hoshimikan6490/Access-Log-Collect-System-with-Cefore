@@ -473,6 +473,8 @@ cefnetd_object_forward (
 	Forwards the specified Content Object with the Log Tag of each Face
 	tags[i] / tag_lens[i] is the Log Tag to put on the Object sent to faceids[i].
 	A Face whose tag_lens[i] is 0 gets the Object as it is.
+	tagged_ok (may be NULL) receives, for each Face, 1 only if the Object sent to it really
+	carries tags[i]; it is 0 when the tag could not be built and the original msg was sent.
 ----------------------------------------------------------------------------------------*/
 int											/* Returns a negative value if it fails 	*/
 cefnetd_object_forward_with_log_tag (
@@ -481,6 +483,7 @@ cefnetd_object_forward_with_log_tag (
 	uint16_t faceid_num,
 	const unsigned char* const tags[],
 	const uint16_t tag_lens[],
+	uint8_t tagged_ok[],
 	unsigned char* msg,
 	uint16_t payload_len,
 	uint16_t header_len,

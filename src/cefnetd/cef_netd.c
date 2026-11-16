@@ -561,6 +561,7 @@ cefnetd_access_log_record (
 	const uint16_t faceids[],
 	const unsigned char* const tags[],
 	const uint16_t tag_lens[],
+	const uint8_t tagged_ok[],
 	uint16_t face_num,
 	CefT_CcnMsg_MsgBdy* pm
 );
@@ -4634,11 +4635,12 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 			cef_dbg_write (CefC_Dbg_Finer, "Forward the Content Object to cefnetd(s)\n");
 #endif // CefC_Debug
 			if (log_tag_f) {
+				uint8_t face_tagged[CefC_Fib_UpFace_Max];
 				cefnetd_object_forward_with_log_tag (hdl, faceids, face_num,
-					face_tags, face_tag_lens, msg, payload_len, header_len, &pm, &poh);
-				/* Records the access of the Faces which get the Log Tag of this router */
+					face_tags, face_tag_lens, face_tagged, msg, payload_len, header_len, &pm, &poh);
+				/* Records the access of the Faces which really got the Log Tag of this router */
 				cefnetd_access_log_record (hdl, faceids, face_tags, face_tag_lens,
-					(uint16_t) face_num, &pm);
+					face_tagged, (uint16_t) face_num, &pm);
 			} else if (log_tag_strip_f) {
 				cefnetd_object_forward_without_log_tag (hdl, faceids, face_num,
 					msg, payload_len, header_len, &pm, &poh);
@@ -6165,6 +6167,7 @@ cefnetd_access_log_record (
 	const uint16_t faceids[],				/* Face-IDs to which the Data is forwarded	*/
 	const unsigned char* const tags[],		/* Log Tag sent to each Face-ID				*/
 	const uint16_t tag_lens[],				/* Length of the Log Tag for each Face-ID	*/
+	const uint8_t tagged_ok[],				/* 1: the Data sent to the Face carries the tag	*/
 	uint16_t face_num,						/* Number of Face-IDs						*/
 	CefT_CcnMsg_MsgBdy* pm					/* Parsed message							*/
 ) {
@@ -6187,7 +6190,7 @@ cefnetd_access_log_record (
 	}
 
 	for (i = 0; i < face_num; i++) {
-		if (tag_lens[i] == own_len && memcmp (tags[i], hdl->log_tag_name, own_len) == 0) {
+		if (tagged_ok[i] && tag_lens[i] == own_len && memcmp (tags[i], hdl->log_tag_name, own_len) == 0) {
 			cef_access_log_record (hdl->access_log, faceids[i],
 				pm->name, name_len, new_access, hdl->nowtus);
 		}
