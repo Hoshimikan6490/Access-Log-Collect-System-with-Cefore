@@ -6073,8 +6073,21 @@ cefnetd_log_tag_config_read (
 					*end = '\0';
 				}
 			}
-			strncpy (hdl->log_tag_contents[hdl->log_tag_content_num].name,
-				value, CefC_NAME_BUFSIZ - 1);
+			if (strncmp (value, "ccnx:/", 6) != 0) {
+				/* The lookup compares against "ccnx:/..." URIs, so it would never match */
+				cef_log_write (CefC_Log_Warn,
+					"log_tag.yaml: the name \"%s\" is ignored (it must start with \"ccnx:/\").\n", value);
+				current = -1;
+				continue;
+			}
+			if (strlen (value) >= CefC_NAME_BUFSIZ) {
+				/* Never truncate the name: it would match another content */
+				cef_log_write (CefC_Log_Warn,
+					"log_tag.yaml: a name longer than %d bytes is ignored.\n", CefC_NAME_BUFSIZ - 1);
+				current = -1;
+				continue;
+			}
+			strcpy (hdl->log_tag_contents[hdl->log_tag_content_num].name, value);
 			hdl->log_tag_contents[hdl->log_tag_content_num].enabled = 0;
 			hdl->log_tag_contents[hdl->log_tag_content_num].wildcard = 0;
 			hdl->log_tag_contents[hdl->log_tag_content_num].name_len =
