@@ -4611,7 +4611,11 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 			log_tag_f = 1;
 			break;
 		case CefC_LogTag_Disabled:
-			log_tag_strip_f = (poh.log_tag_len > 0);
+			/*
+			 * poh.log_tag_len is 0 for an empty (or oversized) LOG_TAG TLV, which must be
+			 * removed too.  The strip function forwards the Data as it is when no TLV exists.
+			 */
+			log_tag_strip_f = 1;
 			break;
 		default:
 			log_tag_f = (poh.log_tag_len > 0);
