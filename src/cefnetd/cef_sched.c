@@ -188,6 +188,7 @@ cefnetd_nict_log_tag_find (
  * and must not overlap msg.
  * Returns 1 if the tag was added (the packet is in new_msg and header_len/payload_len
  * are updated), otherwise 0 (new_msg is not valid and the caller keeps using msg).
+ * It also returns 0 if pkt_len differs from header_len + payload_len, or the packet is too large.
  */
 int
 cefnetd_packet_add_log_tag (
@@ -229,6 +230,12 @@ cefnetd_packet_add_log_tag (
 		return (0);
 	}
 
+	/* The copy length must be consistent with the lengths the caller passed (same as remove) */
+	if ((uint32_t) *header_len + *payload_len > CefC_Max_Msg_Size
+		|| ntohs (in_hdr->pkt_len) != (uint32_t) *header_len + *payload_len) {
+		return (0);
+	}
+
   // check if the message has its own T-ORG TLV and a LOG_TAG TLV in it
 	found = cefnetd_nict_log_tag_find (msg, *header_len,
 				&torg_pos, &old_torg_len, &log_tag_pos, &old_log_tag_len);
@@ -264,6 +271,10 @@ cefnetd_packet_add_log_tag (
 
   // add LOG_TAG TLV (without value of Log Tag) to the copied message
 	shift_from = insert_pos + skip_len;
+	if (shift_from > *header_len) {
+		/* The TLV positions point outside the header: never copy from there */
+		return (0);
+	}
 	memcpy (new_msg, msg, insert_pos);
 	memcpy (&new_msg[insert_pos + insert_len], &msg[shift_from], packet_len - shift_from);
 	if (has_own_torg) {
