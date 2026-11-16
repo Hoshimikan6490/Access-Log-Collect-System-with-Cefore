@@ -1,53 +1,43 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository.
 
 ## What this repository is
 
-A fork of NICT's [Cefore](https://github.com/cefore/cefore) 0.12.x (CCNx-1.0 / RFC8569, RFC8609 ICN platform, written in C) extended with an **access-log tagging** feature: routers stamp forwarded Interests with a router identifier ("log tag"), and that tag is carried back on the returning Data packet so access logs can be collected along the path. Upstream docs live in [doc/](doc/) (Configuration.md, Daemon.md, Tools.md). Commit messages in this repo are written in Japanese.
+A fork of NICT's [Cefore](https://github.com/cefore/cefore) 0.12.x (CCNx-1.0 ICN platform, C) with an **access-log tagging** feature: routers stamp forwarded Interests with a router identifier ("log tag"), the tag is carried back on the returning Data, and the router next to the Consumer records the access. Upstream docs: [doc/](doc/). Commit messages are written in Japanese.
 
-## Build
+## Rules
 
-Do not build or test the project, as the user is responsible for all build and testing activities.
+- Do not build or test; the user does that.
+- You may read and edit text files in this workspace via the shell without asking. Ask before any other shell use (running applications, etc.).
+- Never delete files; ask the user.
+- Code and documents in English; talk to the user in Japanese.
+- Keep changes in scope: do not add fields, params or APIs unrelated to the task. Do not keep unused code (the transfer side below is the only planned exception).
+- Explain clearly what you changed.
 
-## Shell and file operations
+## Layout
 
-- Within this workspace, you may use the shell to retrieve or edit text in code and document files without asking the user first.
-- Explain clearly to the user what you changed.
-- Never delete files. Ask the user to perform any file deletion.
-- Ask the user before using the shell for operations other than retrieving or editing files or data, including running applications.
+- `src/lib/`: `libcefore` (`cef_frame.c` TLV parse/build, `cef_pit.c`, `cef_fib.c`, `cef_face.c`, `cef_client.c`).
+- `src/cefnetd/`: forwarding daemon. `cef_netd.c` (handle, `cefnetd_config_read`, event loop, `cefnetd_incoming_*_process`), `cef_sched.c` (forwarding helpers, tag add/remove), `cef_netd.h` (`CefT_Netd_Handle`), `cef_access_log.c/.h`.
+- `src/csmgrd/`, `src/conpubd/`, `src/plugin/`, `src/dlplugin/`, `tools/`, `utils/`: other daemons, plugins, CLI tools.
+- `config/*.def`: config templates. `CefC_ParamName_*` macros are in `src/include/cefore/cef_define.h`.
+- `cefnetd_config_read` trims all whitespace and does **not** strip quotes.
 
-## Language
+## Access-log tagging
 
-- Maintain code and documents in English.
-- Communicate with the user in Japanese.
+1. **Config.** `cefnetd.conf`: `ENABLE_ACCESS_LOG`, `LOG_TAG_NAME` (empty → `My_Node_Name`, i.e. `NODE_NAME` or the node IP; max `CefC_Max_Log_Tag_Size` = 20 bytes). `config/log_tag.yaml` (`name:` / `collect:`) is read at start-up into `hdl->log_tag_contents`. A `name` must start with `ccnx:/` and fit in the buffer, otherwise the entry is ignored with a warning; a trailing `/*` is a prefix wildcard.
+2. **Interest.** `cefnetd_interest_forward` calls `cefnetd_packet_add_log_tag` (`cef_sched.c`): a `CefC_T_LOG_TAG` TLV inside the NICT `CefC_T_OPT_ORG` header (PEN `CefC_NICT_PEN`). An existing tag is never overwritten (`overwrite = 0`).
+3. **Parse & PIT.** `cef_frame_opheader_user_tlv_parse` fills `CefT_CcnMsg_OptHdr.log_tag`; a tag longer than 20 bytes is treated as no tag (never truncated). `cef_pit_entry_down_face_update` keeps the first tag per downstream Face (`CefT_Down_Faces.log_tag`).
+4. **Data.** The ContentObject path in `cef_netd.c` uses `cefnetd_log_tag_lookup` (exact name beats wildcard; `collect: true` beats `false` on a tie; results are cached per Name) to pick the role. Only the Producer is assumed to have `log_tag.yaml`:
+   - `collect: true` → tag per Face, replacing any tag (`cefnetd_object_forward_with_log_tag`, `overwrite = 1`).
+   - `collect: false` → strip any LOG_TAG TLV, including an empty one (`cefnetd_object_forward_without_log_tag`).
+   - no match (router / network cache) → re-tag per Face only if the Data has a tag; otherwise forward untagged.
+   - Tag per Face: the Interest's own tag from the PIT; if that Interest had none (Consumer directly below), this router's `log_tag_name`, never another Interest's tag.
+5. **Access log buffer** (`cef_access_log.c/.h`, only when `ENABLE_ACCESS_LOG=1`). `cefnetd_access_log_record` records a Face only if its Data really carries this router's own tag (`tagged_ok[]` from the forward function; tag building can fail and fall back to the original msg). Entries are aggregated per (Face-ID, Name without chunk) with `first_ts`/`last_ts`/`access_count` (chunk 0 only, or every Data if no chunk)/`chunk_count`. Fixed-size slots + hash + LRU: when full the oldest entry is overwritten (`evicted`); a Name over `ACCESS_LOG_NAME_MAX` is skipped (`skipped_long_name`), never truncated. Two buffers swap at `ACCESS_LOG_SWAP_THRESHOLD`. Params: `ACCESS_LOG_BUFFER_SIZE`, `ACCESS_LOG_NAME_MAX`, `ACCESS_LOG_SWAP_THRESHOLD`.
+   - **Transfer side is not implemented.** `cef_access_log_acquire` / `_release` have no callers, so after the first swap the other buffer stays READY and no further swap happens (the accumulation buffer only evicts). Do not add `flush` or similar helpers until the transfer design exists.
 
-## Architecture overview
+## Invariants for packet rewriting
 
-- `src/lib/` → `libcefore`: shared code used by the daemons and tools. Key files: `cef_frame.c` (CCNx TLV parse/build, including optional-header parsing), `cef_pit.c` / `cef_fib.c`, `cef_face.c`, `cef_client.c` (config dir lookup, time).
-- `src/cefnetd/`: the forwarding daemon.
-  - `cef_netd.c`: handle creation, `cefnetd_config_read` (parses `cefnetd.conf` line by line through `cefnetd_trim_line_string`, which strips all whitespace and does **not** strip quotes), event loop, and the `cefnetd_incoming_*_process` handlers for Interest, ContentObject, ccninfo and so on.
-  - `cef_sched.c`: `cefnetd_interest_forward` and other packet-forwarding helpers.
-  - `cef_netd.h`: `CefT_Netd_Handle`, the central state struct that is passed everywhere.
-- `src/csmgrd/`, `src/conpubd/`: content-store manager and content publisher daemons. `src/plugin/`, `src/dlplugin/`: transport and forwarding-strategy plugins.
-- `tools/`, `utils/`: CLI tools (`cefgetfile`, `ccninfo`, ...) and the start/stop/status shell wrappers.
-- `config/*.def`: config templates installed as `$CEFORE_DIR/cefore/*`. Parameter-name macros (`CefC_ParamName_*`) are defined in `src/include/cefore/cef_define.h`.
-
-## Access-log tagging (this fork's feature)
-
-The flow spans several files:
-
-1. **Config.** `cefnetd.conf` has `ENABLE_ACCESS_LOG` (0/1) and `LOG_TAG_NAME`. If `LOG_TAG_NAME` is empty, `cefnetd_handle_create` falls back to `My_Node_Name`. `My_Node_Name` comes from `NODE_NAME`, or from the node IP address when `NODE_NAME` is unset. Separately, `config/log_tag.yaml` lists content names (`LCL: - name: / collect:`). It is read by `cefnetd_log_tag_config_read` into `hdl->log_tag_contents`.
-2. **Interest forwarding.** When access logging is enabled, `cefnetd_interest_forward` calls `cefnetd_packet_add_log_tag` (in `cef_sched.c`), which adds a `CefC_T_LOG_TAG` TLV inside the NICT vendor `CefC_T_OPT_ORG` hop-by-hop header (PEN `CefC_NICT_PEN`). This function rewrites `header_len` / `payload_len` in place.
-3. **Parse & PIT.** `cef_frame_opheader_user_tlv_parse` stores the tag in `CefT_CcnMsg_OptHdr.log_tag`. `cef_pit_entry_down_face_update` copies it into the per-Face `CefT_Down_Faces.log_tag` (the first tag from a Face wins), so every downstream Face of a PIT entry keeps the tag of its own Interest. A router never overwrites a tag that an Interest already carries (`cefnetd_packet_add_log_tag` with `overwrite = 0`).
-4. **Data return.** In the ContentObject path in `cef_netd.c`, `cefnetd_object_forward_with_log_tag` (`cef_sched.c`) tags the Data per downstream Face (`overwrite = 1`). This applies to every Data source (upstream router, local producer face, cefnetd cache, csmgrd), and the cache stores the received msg as it is (including the tag). Only the Producer is assumed to have `log_tag.yaml` (operational rule), so `cefnetd_log_tag_lookup` (`cef_netd.c`) decides the role from the name (an exact name wins over a wildcard, `collect: true` wins over `false` on a tie):
-   - `collect: true` matches (Producer) → tag per Face, replacing any existing tag.
-   - `collect: false` matches (Producer) → forwarded without tag; an existing tag is removed (`cefnetd_object_forward_without_log_tag`, `cefnetd_packet_remove_log_tag` in `cef_sched.c`).
-   - No match (router / network cache) → a Data (or cache entry) with a tag is re-tagged per Face; a Data without a tag is forwarded untagged even if the PIT has tags.
-
-   Per Face when tagging:
-   - Interest had a tag (kept in the PIT) → that tag.
-   - Interest had no tag (the Consumer is directly below this router; tagged and untagged Interests may be aggregated in one PIT entry) → this router's own tag (`hdl->log_tag_name`), never another Interest's tag.
-5. **Access log buffer** (`cef_access_log.c/.h` in `src/cefnetd/`, `hdl->access_log`, created in `cefnetd_handle_create` only when `ENABLE_ACCESS_LOG=1`). Just after `cefnetd_object_forward_with_log_tag`, `cefnetd_access_log_record` (`cef_netd.c`) records every Face whose outgoing tag equals this router's own tag (`hdl->log_tag_name`), i.e. the Consumer-side Face. Entries are aggregated per (Face-ID, Name without the chunk number) with `first_ts` / `last_ts` / `access_count` (chunk 0 only, or every Data when the Name has no chunk) / `chunk_count`. Each buffer is a fixed-size slot array with a hash table and an LRU list; when full, the least recently accessed entry is overwritten (`evicted` counts them), and a Name longer than `ACCESS_LOG_NAME_MAX` is skipped (`skipped_long_name`), never truncated. Two buffers (accumulation / transfer) are swapped when the usage reaches `ACCESS_LOG_SWAP_THRESHOLD` (or by `cef_access_log_flush`); the transfer side uses `cef_access_log_acquire` / `cef_access_log_release` (not implemented yet). Data without a tag (`collect: false`, untagged cache) is never recorded. Params: `ACCESS_LOG_BUFFER_SIZE`, `ACCESS_LOG_NAME_MAX`, `ACCESS_LOG_SWAP_THRESHOLD`.
-
-When adding a new field to a packet, update the TLV type in `cef_frame.h`, the parse in `cef_frame.c`, any PIT storage in `cef_pit.h` / `cef_pit.c`, and the length fix-ups wherever the packet is rebuilt.
+- `cefnetd_packet_add_log_tag` / `_remove_log_tag` require `pkt_len == header_len + payload_len` and size limits; on failure add returns 0 (caller keeps the original msg), remove returns -1.
+- Rebuilt packets go into `hdl->log_tag_buf`, never into the receive buffer or a cache entry; re-parse with `cefnetd_packet_reparse`.
+- Adding a packet field: update the TLV type in `cef_frame.h`, the parse in `cef_frame.c`, PIT storage in `cef_pit.h/.c`, and every length fix-up where the packet is rebuilt.
