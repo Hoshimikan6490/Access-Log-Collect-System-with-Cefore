@@ -14,7 +14,7 @@
  *     accumulation buffer --(swap)--> READY --(acquire)--> IN_USE --(release)--> EMPTY
  *
  * Thread safety:
- *   - cef_access_log_record() and cef_access_log_flush() may be called from any thread
+ *   - cef_access_log_record() may be called from any thread
  *     (they are serialized by a mutex).
  *   - A buffer returned by cef_access_log_acquire() is owned by the caller until
  *     cef_access_log_release() is called; it can be read without any lock.
@@ -124,14 +124,6 @@ cef_access_log_record (
 );
 
 /*--------------------------------------------------------------------------------------
-	Swaps the buffers even if the threshold is not reached
-----------------------------------------------------------------------------------------*/
-int											/* Returns 1 if swapped, 0 otherwise		*/
-cef_access_log_flush (
-	CefT_AccessLog* al
-);
-
-/*--------------------------------------------------------------------------------------
 	Acquires the buffer to transfer
 ----------------------------------------------------------------------------------------*/
 CefT_AccessLog_Buf*							/* Returns NULL if no buffer is ready		*/
@@ -149,20 +141,10 @@ cef_access_log_release (
 	CefT_AccessLog_Buf* buf
 );
 
-/*--------------------------------------------------------------------------------------
-	Gets the Name of an entry of the acquired buffer
-----------------------------------------------------------------------------------------*/
-static inline const unsigned char*
-cef_access_log_entry_name (
-	const CefT_AccessLog_Buf* buf,
-	int32_t idx
-) {
-	return (&buf->names[(size_t) idx * buf->name_max]);
-}
-
 /*
  * Iterates the entries of an acquired buffer from the oldest to the newest:
  *   for (i = buf->lru_head; i != CefC_AccessLog_Idx_None; i = buf->entries[i].lru_next)
+ * The Name of entry i is at &buf->names[(size_t) i * buf->name_max] (entries[i].name_len bytes).
  */
 
 #endif // __CEF_ACCESS_LOG_HEADER__

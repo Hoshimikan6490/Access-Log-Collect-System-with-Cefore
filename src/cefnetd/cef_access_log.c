@@ -215,27 +215,6 @@ cef_access_log_record (
 }
 
 /*--------------------------------------------------------------------------------------
-	Swaps the buffers even if the threshold is not reached
-----------------------------------------------------------------------------------------*/
-int
-cef_access_log_flush (
-	CefT_AccessLog* al
-) {
-	int res = 0;
-
-	if (al == NULL) {
-		return (0);
-	}
-	pthread_mutex_lock (&al->mutex);
-	if (al->buf[al->active].used > 0 || al->buf[al->active].skipped_long_name > 0) {
-		res = cef_access_log_swap_locked (al);
-	}
-	pthread_mutex_unlock (&al->mutex);
-
-	return (res);
-}
-
-/*--------------------------------------------------------------------------------------
 	Acquires the buffer to transfer
 ----------------------------------------------------------------------------------------*/
 CefT_AccessLog_Buf*
