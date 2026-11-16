@@ -99,6 +99,14 @@ typedef struct {
 	uint16_t name_len;		/* strlen (name), precomputed at config read */
 } CefT_LogTag_Content_Config;
 
+/* Cache of the log_tag.yaml lookup result (direct-mapped, keyed by the Name without chunk number) */
+#define CefC_LogTag_Cache_Size	16		/* Power of 2 */
+typedef struct {
+	uint16_t		key_len;			/* 0: empty slot */
+	int				result;				/* CefC_LogTag_NoMatch / _Enabled / _Disabled */
+	unsigned char	key[CefC_NAME_MAXLEN];
+} CefT_LogTag_Cache_Entry;
+
 /* Builds the tagged packet in new_msg (CefC_Max_Msg_Size bytes) without modifying msg.	*/
 /* Returns 1 if tagged (use new_msg afterward), otherwise 0 (keep using msg).			*/
 /* overwrite: 0 keeps an existing non-empty tag (returns 0), 1 replaces it.			*/
@@ -217,6 +225,7 @@ typedef struct {
 	uint32_t		access_log_swap_pct;		/* Usage (%) which triggers a swap		*/
 	uint16_t		log_tag_content_num;  /* Count of log tag contents */
 	CefT_LogTag_Content_Config log_tag_contents[CefC_LogTag_Content_Max]; /* Log tag contents */
+	CefT_LogTag_Cache_Entry log_tag_cache[CefC_LogTag_Cache_Size];	/* Lookup result cache (log_tag_contents is read once at start-up) */
 	uint32_t 			fib_max_size;			/* Maximum FIB entry 					*/
 	uint32_t 			pit_max_size;			/* Maximum PIT entry 					*/
 	int		 			sk_type;				/* Type of socket 						*/

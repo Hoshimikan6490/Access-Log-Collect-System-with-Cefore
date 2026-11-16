@@ -555,6 +555,11 @@ cefnetd_log_tag_lookup (
 	CefT_Netd_Handle* hdl,
 	CefT_CcnMsg_MsgBdy* pm
 );
+static int
+cefnetd_log_tag_lookup_scan (
+	CefT_Netd_Handle* hdl,
+	CefT_CcnMsg_MsgBdy* pm
+);
 static void
 cefnetd_access_log_record (
 	CefT_Netd_Handle* hdl,
@@ -6112,6 +6117,55 @@ cefnetd_log_tag_lookup (
 	CefT_Netd_Handle* hdl,
 	CefT_CcnMsg_MsgBdy* pm
 ) {
+	uint16_t i;
+	int best_result;
+
+	if (hdl->log_tag_content_num == 0 || pm->name_len > CefC_NAME_MAXLEN) {
+		return (CefC_LogTag_NoMatch);
+	}
+
+	/*
+	 * The result depends only on the Name up to the first chunk segment (the same part
+	 * the URI conversion uses), so it is cached per that key.  log_tag_contents is never
+	 * modified after start-up, so the cache needs no invalidation.
+	 */
+	{
+		uint16_t key_len = 0;
+		uint32_t hv = 2166136261u;				/* FNV-1a */
+		CefT_LogTag_Cache_Entry* ce;
+
+		while ((uint32_t) key_len + CefC_S_TLF <= pm->name_len) {
+			struct tlv_hdr* th = (struct tlv_hdr*) &pm->name[key_len];
+			uint32_t seg = (uint32_t) CefC_S_TLF + ntohs (th->length);
+			if (ntohs (th->type) == CefC_T_CHUNK ||
+				(uint32_t) key_len + seg > pm->name_len) {
+				break;
+			}
+			key_len += (uint16_t) seg;
+		}
+		for (i = 0; i < key_len; i++) {
+			hv = (hv ^ pm->name[i]) * 16777619u;
+		}
+		ce = &hdl->log_tag_cache[hv & (CefC_LogTag_Cache_Size - 1)];
+		if (key_len > 0 && ce->key_len == key_len && memcmp (ce->key, pm->name, key_len) == 0) {
+			return (ce->result);
+		}
+		best_result = cefnetd_log_tag_lookup_scan (hdl, pm);
+		if (key_len > 0) {
+			ce->key_len = key_len;
+			ce->result = best_result;
+			memcpy (ce->key, pm->name, key_len);
+		}
+		return (best_result);
+	}
+}
+
+/* Linear scan of log_tag_contents (slow path of cefnetd_log_tag_lookup) */
+static int
+cefnetd_log_tag_lookup_scan (
+	CefT_Netd_Handle* hdl,
+	CefT_CcnMsg_MsgBdy* pm
+) {
 	/*
 	 * The conversion helper does no bounds checking. In the worst case every name byte is expanded to 2 hex characters, so the output is at most 2 * name_len plus the "ccnx:/" prefix and a few separators. The extra margin covers those.
 	 */
@@ -6119,10 +6173,6 @@ cefnetd_log_tag_lookup (
 	uint16_t i;
 	int best_score = 0;						/* 0: none, wildcard: 1 + prefix length, exact: max */
 	int best_result = CefC_LogTag_NoMatch;
-
-	if (hdl->log_tag_content_num == 0 || pm->name_len > CefC_NAME_MAXLEN) {
-		return (CefC_LogTag_NoMatch);
-	}
 
 	cef_frame_conversion_name_to_uri_without_chunknum (pm->name, pm->name_len, uri);
 	for (i = 0; i < hdl->log_tag_content_num; i++) {
