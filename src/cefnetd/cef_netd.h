@@ -68,6 +68,7 @@
 #include <cefore/cef_valid.h>
 #include <cefore/cef_log.h>
 #include <cefore/cef_pthread.h>
+#include "cef_access_log.h"
 
 #include <cefore/cef_ccninfo.h>
 
@@ -98,6 +99,14 @@ typedef struct {
 	uint16_t name_len;		/* strlen (name), precomputed at config read */
 } CefT_LogTag_Content_Config;
 
+/* Cache of the log_tag.yaml lookup result (direct-mapped, keyed by the Name without chunk number) */
+#define CefC_LogTag_Cache_Size	16		/* Power of 2 */
+typedef struct {
+	uint16_t		key_len;			/* 0: empty slot */
+	int				result;				/* CefC_LogTag_NoMatch / _Enabled / _Disabled */
+	unsigned char	key[CefC_NAME_MAXLEN];
+} CefT_LogTag_Cache_Entry;
+
 /* Builds the tagged packet in new_msg (CefC_Max_Msg_Size bytes) without modifying msg.	*/
 /* Returns 1 if tagged (use new_msg afterward), otherwise 0 (keep using msg).			*/
 /* overwrite: 0 keeps an existing non-empty tag (returns 0), 1 replaces it.			*/
@@ -109,6 +118,15 @@ int cefnetd_packet_add_log_tag (
 	const unsigned char* log_tag,
 	uint16_t log_tag_len,
 	int overwrite
+);
+/* Builds the packet without the Log Tag in new_msg (CefC_Max_Msg_Size bytes) without	*/
+/* modifying msg.  Returns 1 if the tag was removed (use new_msg afterward),			*/
+/* otherwise 0 (msg has no Log Tag; keep using msg).									*/
+int cefnetd_packet_remove_log_tag (
+	const unsigned char* msg,
+	unsigned char* new_msg,
+	uint16_t* header_len,
+	uint16_t* payload_len
 );
 /*------------------------------------------------------------------*/
 /* Commands to control cefnetd										*/
@@ -195,13 +213,18 @@ typedef struct {
 
 	/********** Parameters 			***********/
 	uint16_t 			port_num;				/* Port Number							*/
-	char				local_sock_id[CefC_LOCAL_SOCK_ID_SIZ + 1];
 	char				log_tag_name[CefC_Max_Log_Tag_Size + 1];
 	int				access_log_f;				/* 0:Disable 1:Enable access log		*/
 	// Scratch buffer (CefC_Max_Msg_Size bytes) in which a packet with a Log Tag is built.
 	unsigned char*	log_tag_buf;
+	/* Access log buffer (NULL if ENABLE_ACCESS_LOG is 0) */
+	CefT_AccessLog*	access_log;
+	uint32_t		access_log_buf_size;		/* Entries per buffer					*/
+	uint32_t		access_log_name_max;		/* Max bytes of a stored Name			*/
+	uint32_t		access_log_swap_pct;		/* Usage (%) which triggers a swap		*/
 	uint16_t		log_tag_content_num;  /* Count of log tag contents */
 	CefT_LogTag_Content_Config log_tag_contents[CefC_LogTag_Content_Max]; /* Log tag contents */
+	CefT_LogTag_Cache_Entry log_tag_cache[CefC_LogTag_Cache_Size];	/* Lookup result cache (log_tag_contents is read once at start-up) */
 	uint32_t 			fib_max_size;			/* Maximum FIB entry 					*/
 	uint32_t 			pit_max_size;			/* Maximum PIT entry 					*/
 	int		 			sk_type;				/* Type of socket 						*/
@@ -458,6 +481,8 @@ cefnetd_object_forward (
 	Forwards the specified Content Object with the Log Tag of each Face
 	tags[i] / tag_lens[i] is the Log Tag to put on the Object sent to faceids[i].
 	A Face whose tag_lens[i] is 0 gets the Object as it is.
+	tagged_ok (may be NULL) receives, for each Face, 1 only if the Object sent to it really
+	carries tags[i]; it is 0 when the tag could not be built and the original msg was sent.
 ----------------------------------------------------------------------------------------*/
 int											/* Returns a negative value if it fails 	*/
 cefnetd_object_forward_with_log_tag (
@@ -466,6 +491,22 @@ cefnetd_object_forward_with_log_tag (
 	uint16_t faceid_num,
 	const unsigned char* const tags[],
 	const uint16_t tag_lens[],
+	uint8_t tagged_ok[],
+	unsigned char* msg,
+	uint16_t payload_len,
+	uint16_t header_len,
+	CefT_CcnMsg_MsgBdy* pm,
+	CefT_CcnMsg_OptHdr* poh
+);
+/*--------------------------------------------------------------------------------------
+	Forwards the specified Content Object after removing its Log Tag
+	(the Object is forwarded as it is if it has no Log Tag)
+----------------------------------------------------------------------------------------*/
+int											/* Returns a negative value if it fails 	*/
+cefnetd_object_forward_without_log_tag (
+	CefT_Netd_Handle* hdl,
+	uint16_t faceids[],
+	uint16_t faceid_num,
 	unsigned char* msg,
 	uint16_t payload_len,
 	uint16_t header_len,

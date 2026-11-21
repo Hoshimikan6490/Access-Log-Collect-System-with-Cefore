@@ -3907,11 +3907,13 @@ cef_frame_opheader_user_tlv_parse (
 							wp = ewp;
 							break;
 						}
-						poh->log_tag_len = tag_len;
-						if (poh->log_tag_len > sizeof (poh->log_tag)) {
-							poh->log_tag_len = sizeof (poh->log_tag);
+						if (tag_len > sizeof (poh->log_tag)) {
+							/* Never keep a truncated tag: it would differ from the original */
+							poh->log_tag_len = 0;
+						} else {
+							poh->log_tag_len = tag_len;
+							memcpy (poh->log_tag, &wp[CefC_S_TLF], tag_len);
 						}
-						memcpy (poh->log_tag, &wp[CefC_S_TLF], poh->log_tag_len);
 						wp += CefC_S_TLF + tag_len;
 						index += CefC_S_TLF + tag_len;
 						break;
