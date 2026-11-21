@@ -233,6 +233,10 @@ cefnetd_packet_add_log_tag (
 	/* The copy length must be consistent with the lengths the caller passed (same as remove) */
 	if ((uint32_t) *header_len + *payload_len > CefC_Max_Msg_Size
 		|| ntohs (in_hdr->pkt_len) != (uint32_t) *header_len + *payload_len) {
+		cef_log_write (CefC_Log_Warn,
+			"Log Tag was not added: inconsistent packet length (pkt_len=%u, header_len=%u, payload_len=%u)\n",
+			(unsigned int) ntohs (in_hdr->pkt_len),
+			(unsigned int) *header_len, (unsigned int) *payload_len);
 		return (0);
 	}
 

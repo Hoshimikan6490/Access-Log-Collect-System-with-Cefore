@@ -1257,6 +1257,16 @@ cefnetd_handle_create (
 
 	/* Access log buffers (accumulation and transfer) */
 	if (hdl->access_log_f) {
+		if ((uint64_t) hdl->access_log_buf_size * hdl->access_log_name_max
+				> CefC_AccessLog_Max_NameMem) {
+			cef_log_write (CefC_Log_Error,
+				"%s %s (%u) * %s (%u) must be at most %u bytes\n", __func__,
+				CefC_ParamName_AccessLogBufSize, hdl->access_log_buf_size,
+				CefC_ParamName_AccessLogNameMax, hdl->access_log_name_max,
+				(unsigned int) CefC_AccessLog_Max_NameMem);
+			cefnetd_handle_destroy (hdl);
+			return (NULL);
+		}
 		hdl->access_log = cef_access_log_create (hdl->access_log_buf_size,
 			hdl->access_log_name_max, hdl->access_log_swap_pct);
 		if (hdl->access_log == NULL) {
@@ -1265,6 +1275,10 @@ cefnetd_handle_create (
 			cefnetd_handle_destroy (hdl);
 			return (NULL);
 		}
+		cef_log_write (CefC_Log_Info,
+			"Access log buffers allocated: 2 x %u entries, Name area %llu bytes in total\n",
+			hdl->access_log_buf_size,
+			(unsigned long long) hdl->access_log_buf_size * hdl->access_log_name_max * 2);
 	}
 
 	hdl->app_rsp_msg = calloc(10, CefC_Max_Length);
@@ -4618,7 +4632,17 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 			log_tag_strip_f = 1;
 			break;
 		default:
-			log_tag_f = (poh.log_tag_len > 0);
+			if (poh.log_tag_len > 0) {
+				log_tag_f = 1;
+			} else {
+				/*
+				 * No usable tag: forward as plain ICN.  poh.log_tag_len is also 0 for an
+				 * empty or oversized (misconfigured) LOG_TAG TLV, which is removed here as
+				 * in the Disabled case.  No access log is recorded for it.
+				 * The strip function forwards the Data as it is when no TLV exists.
+				 */
+				log_tag_strip_f = 1;
+			}
 			break;
 		}
 	}

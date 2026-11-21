@@ -98,6 +98,9 @@ cef_access_log_create (
 	if (buf_size < 1 || buf_size > CefC_AccessLog_Max_BufSize || name_max < 1) {
 		return (NULL);
 	}
+	if ((uint64_t) buf_size * name_max > CefC_AccessLog_Max_NameMem) {
+		return (NULL);
+	}
 	if (swap_pct < 1) {
 		swap_pct = 1;
 	} else if (swap_pct > 100) {

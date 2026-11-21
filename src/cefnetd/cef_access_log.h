@@ -36,6 +36,7 @@
 #define CefC_AccessLog_Default_BufSize		4096	/* Entries per buffer				*/
 #define CefC_AccessLog_Max_BufSize			1048576
 #define CefC_AccessLog_Default_NameMax		256		/* Max bytes of a stored Name		*/
+#define CefC_AccessLog_Max_NameMem			(64U * 1024U * 1024U)	/* Max bytes of Names per buffer (BUFFER_SIZE * NAME_MAX) */
 #define CefC_AccessLog_Default_SwapPct		80		/* Usage (%) which triggers a swap	*/
 
 #define CefC_AccessLog_Idx_None				(-1)
