@@ -39,6 +39,8 @@
 # Max length (bytes) of a Contents Name to record.
 # A longer name is not recorded.
 # Range: 1 <= n <= 1024
+# ACCESS_LOG_BUFFER_SIZE * ACCESS_LOG_NAME_MAX must be at most 67108864 (64 MiB);
+# otherwise cefnetd fails to start.
 #ACCESS_LOG_NAME_MAX=256
 #
 # Usage (%) of the accumulation buffer which triggers the swap with the transfer buffer.
