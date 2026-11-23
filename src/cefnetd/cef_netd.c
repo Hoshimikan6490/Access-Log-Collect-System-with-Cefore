@@ -546,8 +546,12 @@ static void
 cefnetd_log_tag_config_read (
 	CefT_Netd_Handle* hdl
 );
+/* Result of the log_tag.yaml lookup.  A node which has a matching entry is the Producer. */
+#define CefC_LogTag_NoMatch		0	/* no entry matches (this node acts as a router)	*/
+#define CefC_LogTag_Enabled		1	/* matches an entry with "collect: true"			*/
+#define CefC_LogTag_Disabled	2	/* matches an entry with "collect: false"			*/
 static int
-cefnetd_log_tag_is_enabled (
+cefnetd_log_tag_lookup (
 	CefT_Netd_Handle* hdl,
 	CefT_CcnMsg_MsgBdy* pm
 );
@@ -4557,22 +4561,28 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 	/*
 	 * Log Tag handling.  Each downstream Face gets the Data with the Log Tag of
 	 * the Interest which came from that Face (kept in the PIT).
-	 *  - Data which already has a Log Tag (from an upstream router or from a cache)
-	 *    is tagged again for each Face.  log_tag.yaml is not consulted.
-	 *  - Data without a Log Tag is tagged only when this node acts as the producer,
-	 *    that is, the Data comes from a local producer Face, the local cache or csmgrd,
-	 *    and its name is enabled in log_tag.yaml.
-	 *  - Data without a Log Tag from an upstream router is forwarded as it is,
-	 *    because the upstream decided that it is not a collection target.
+	 * Only the Producer is assumed to have log_tag.yaml (operational rule), so a node with
+	 * a matching entry decides by itself and a node without one follows the Data.
+	 *  - The name matches "collect: true": the Data is tagged for each Face, and an
+	 *    existing Log Tag (from an upstream router or from a cache) is replaced.
+	 *  - The name matches "collect: false": the Data is sent without Log Tag, and an
+	 *    existing Log Tag is removed.
+	 *  - No entry matches (router, network cache): a Data with a Log Tag is tagged again
+	 *    for each Face; a Data without a Log Tag is sent as it is, even if the PIT has tags.
 	 */
 	int log_tag_f = 0;
+	int log_tag_strip_f = 0;
 	if (hdl->access_log_f) {
-		if (poh.log_tag_len > 0) {
+		switch (cefnetd_log_tag_lookup (hdl, &pm)) {
+		case CefC_LogTag_Enabled:
 			log_tag_f = 1;
-		} else if ((obj_sender_type != CefC_OBJ_Sender_Type_Neighbor ||
-				cef_face_is_local_face (peer_faceid)) &&
-			cefnetd_log_tag_is_enabled (hdl, &pm)) {
-			log_tag_f = 1;
+			break;
+		case CefC_LogTag_Disabled:
+			log_tag_strip_f = (poh.log_tag_len > 0);
+			break;
+		default:
+			log_tag_f = (poh.log_tag_len > 0);
+			break;
 		}
 	}
 
@@ -4599,6 +4609,9 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 			if (log_tag_f) {
 				cefnetd_object_forward_with_log_tag (hdl, faceids, face_num,
 					face_tags, face_tag_lens, msg, payload_len, header_len, &pm, &poh);
+			} else if (log_tag_strip_f) {
+				cefnetd_object_forward_without_log_tag (hdl, faceids, face_num,
+					msg, payload_len, header_len, &pm, &poh);
 			} else {
 				cefnetd_object_forward (hdl, faceids, face_num, msg,
 					payload_len, header_len, &pm, &poh);
@@ -6055,8 +6068,15 @@ cefnetd_log_tag_config_read (
 	fclose (fp);
 }
 
-static int
-cefnetd_log_tag_is_enabled (
+/*
+ * Looks up the name of pm in log_tag.yaml.
+ * When several entries match, an exact name wins over a wildcard name, the longest
+ * wildcard prefix wins among wildcards, and "collect: true" wins over
+ * "collect: false" only when the specificity is the same.
+ */
+#define CefC_LogTag_ExactScore	0x100000	/* larger than any wildcard score */
+static int								/* CefC_LogTag_NoMatch / _Enabled / _Disabled */
+cefnetd_log_tag_lookup (
 	CefT_Netd_Handle* hdl,
 	CefT_CcnMsg_MsgBdy* pm
 ) {
@@ -6065,35 +6085,41 @@ cefnetd_log_tag_is_enabled (
 	 */
 	char uri[CefC_NAME_BUFSIZ + 16];
 	uint16_t i;
+	int best_score = 0;						/* 0: none, wildcard: 1 + prefix length, exact: max */
+	int best_result = CefC_LogTag_NoMatch;
 
-	if (pm->name_len > CefC_NAME_MAXLEN) {
-		return (0);
-	}
-	for (i = 0; i < hdl->log_tag_content_num; i++) {
-		if (hdl->log_tag_contents[i].enabled) {
-			break;
-		}
-	}
-	if (i == hdl->log_tag_content_num) {
-		return (0);
+	if (hdl->log_tag_content_num == 0 || pm->name_len > CefC_NAME_MAXLEN) {
+		return (CefC_LogTag_NoMatch);
 	}
 
 	cef_frame_conversion_name_to_uri_without_chunknum (pm->name, pm->name_len, uri);
 	for (i = 0; i < hdl->log_tag_content_num; i++) {
-		if (!hdl->log_tag_contents[i].enabled) {
-			continue;
-		}
+		int score;
+		int result;
+
 		if (hdl->log_tag_contents[i].wildcard) {
 			/* name keeps the trailing "/", so the match is on a name component boundary */
 			if (strncmp (hdl->log_tag_contents[i].name, uri,
-					hdl->log_tag_contents[i].name_len) == 0) {
-				return (1);
+					hdl->log_tag_contents[i].name_len) != 0) {
+				continue;
 			}
-		} else if (strcmp (hdl->log_tag_contents[i].name, uri) == 0) {
-			return (1);
+			/* the longer (more specific) prefix wins */
+			score = 1 + (int) hdl->log_tag_contents[i].name_len;
+		} else {
+			if (strcmp (hdl->log_tag_contents[i].name, uri) != 0) {
+				continue;
+			}
+			score = CefC_LogTag_ExactScore;
+		}
+		result = hdl->log_tag_contents[i].enabled ?
+					CefC_LogTag_Enabled : CefC_LogTag_Disabled;
+		if (score > best_score ||
+			(score == best_score && result == CefC_LogTag_Enabled)) {
+			best_score = score;
+			best_result = result;
 		}
 	}
-	return (0);
+	return (best_result);
 }
 
 /*--------------------------------------------------------------------------------------
