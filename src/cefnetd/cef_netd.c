@@ -555,6 +555,21 @@ cefnetd_log_tag_lookup (
 	CefT_Netd_Handle* hdl,
 	CefT_CcnMsg_MsgBdy* pm
 );
+static int
+cefnetd_log_tag_lookup_scan (
+	CefT_Netd_Handle* hdl,
+	CefT_CcnMsg_MsgBdy* pm
+);
+static void
+cefnetd_access_log_record (
+	CefT_Netd_Handle* hdl,
+	const uint16_t faceids[],
+	const unsigned char* const tags[],
+	const uint16_t tag_lens[],
+	const uint8_t tagged_ok[],
+	uint16_t face_num,
+	CefT_CcnMsg_MsgBdy* pm
+);
 
 /*--------------------------------------------------------------------------------------
 	Create for ccninfo_name ccninfo-03
@@ -819,6 +834,10 @@ cefnetd_handle_create (
 	hdl->log_tag_name[0] = '\0';
 	hdl->access_log_f		= 0;
 	hdl->log_tag_buf		= NULL;
+	hdl->access_log			= NULL;
+	hdl->access_log_buf_size	= CefC_AccessLog_Default_BufSize;
+	hdl->access_log_name_max	= CefC_AccessLog_Default_NameMax;
+	hdl->access_log_swap_pct	= CefC_AccessLog_Default_SwapPct;
 	hdl->fib_max_size 	= CefC_Default_FibSize;
 	hdl->pit_max_size 	= CefC_Default_PitSize;
 	hdl->sk_type 		= CefC_Default_Sktype;
@@ -1236,6 +1255,32 @@ cefnetd_handle_create (
 		return (NULL);
 	}
 
+	/* Access log buffers (accumulation and transfer) */
+	if (hdl->access_log_f) {
+		if ((uint64_t) hdl->access_log_buf_size * hdl->access_log_name_max
+				> CefC_AccessLog_Max_NameMem) {
+			cef_log_write (CefC_Log_Error,
+				"%s %s (%u) * %s (%u) must be at most %u bytes\n", __func__,
+				CefC_ParamName_AccessLogBufSize, hdl->access_log_buf_size,
+				CefC_ParamName_AccessLogNameMax, hdl->access_log_name_max,
+				(unsigned int) CefC_AccessLog_Max_NameMem);
+			cefnetd_handle_destroy (hdl);
+			return (NULL);
+		}
+		hdl->access_log = cef_access_log_create (hdl->access_log_buf_size,
+			hdl->access_log_name_max, hdl->access_log_swap_pct);
+		if (hdl->access_log == NULL) {
+			cef_log_write (CefC_Log_Error,
+				"%s access log buffer allocation failed\n", __func__);
+			cefnetd_handle_destroy (hdl);
+			return (NULL);
+		}
+		cef_log_write (CefC_Log_Info,
+			"Access log buffers allocated: 2 x %u entries, Name area %llu bytes in total\n",
+			hdl->access_log_buf_size,
+			(unsigned long long) hdl->access_log_buf_size * hdl->access_log_name_max * 2);
+	}
+
 	hdl->app_rsp_msg = calloc(10, CefC_Max_Length);
 	if (hdl->app_rsp_msg == NULL){
 		cefnetd_handle_destroy (hdl);
@@ -1413,6 +1458,8 @@ cefnetd_handle_destroy (
 		free(hdl->app_rsp_msg);
 	if ( hdl->log_tag_buf )
 		free(hdl->log_tag_buf);
+	if ( hdl->access_log )
+		cef_access_log_destroy(hdl->access_log);
 	if ( hdl->My_Node_Name_TLV )
 		free(hdl->My_Node_Name_TLV);
 	if ( hdl->My_Node_Name )
@@ -4461,6 +4508,9 @@ cefnetd_incoming_object_process_core (
 
 			for (face = &(pe[pe_seq]->dnfaces); face->next;) {
 				face = face->next;
+				if ( face_num >= CefC_Fib_UpFace_Max ) {
+					break;
+				}
 				if ( !cefnetd_faceidmap_is_set(faceid_bitmap, face->faceid) ){
 					cefnetd_faceidmap_set(faceid_bitmap, face->faceid);
 					face_tags[face_num] = face->log_tag;
@@ -4578,10 +4628,24 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 			log_tag_f = 1;
 			break;
 		case CefC_LogTag_Disabled:
-			log_tag_strip_f = (poh.log_tag_len > 0);
+			/*
+			 * poh.log_tag_len is 0 for an empty (or oversized) LOG_TAG TLV, which must be
+			 * removed too.  The strip function forwards the Data as it is when no TLV exists.
+			 */
+			log_tag_strip_f = 1;
 			break;
 		default:
-			log_tag_f = (poh.log_tag_len > 0);
+			if (poh.log_tag_len > 0) {
+				log_tag_f = 1;
+			} else {
+				/*
+				 * No usable tag: forward as plain ICN.  poh.log_tag_len is also 0 for an
+				 * empty or oversized (misconfigured) LOG_TAG TLV, which is removed here as
+				 * in the Disabled case.  No access log is recorded for it.
+				 * The strip function forwards the Data as it is when no TLV exists.
+				 */
+				log_tag_strip_f = 1;
+			}
 			break;
 		}
 	}
@@ -4607,8 +4671,12 @@ cef_dbg_write (CefC_Dbg_Fine, "elem.msg_len(%d) and CCN pkt_len(%d) are inconsis
 			cef_dbg_write (CefC_Dbg_Finer, "Forward the Content Object to cefnetd(s)\n");
 #endif // CefC_Debug
 			if (log_tag_f) {
+				uint8_t face_tagged[CefC_Fib_UpFace_Max];
 				cefnetd_object_forward_with_log_tag (hdl, faceids, face_num,
-					face_tags, face_tag_lens, msg, payload_len, header_len, &pm, &poh);
+					face_tags, face_tag_lens, face_tagged, msg, payload_len, header_len, &pm, &poh);
+				/* Records the access of the Faces which really got the Log Tag of this router */
+				cefnetd_access_log_record (hdl, faceids, face_tags, face_tag_lens,
+					face_tagged, (uint16_t) face_num, &pm);
 			} else if (log_tag_strip_f) {
 				cefnetd_object_forward_without_log_tag (hdl, faceids, face_num,
 					msg, payload_len, header_len, &pm, &poh);
@@ -6036,8 +6104,21 @@ cefnetd_log_tag_config_read (
 					*end = '\0';
 				}
 			}
-			strncpy (hdl->log_tag_contents[hdl->log_tag_content_num].name,
-				value, CefC_NAME_BUFSIZ - 1);
+			if (strncmp (value, "ccnx:/", 6) != 0) {
+				/* The lookup compares against "ccnx:/..." URIs, so it would never match */
+				cef_log_write (CefC_Log_Warn,
+					"log_tag.yaml: the name \"%s\" is ignored (it must start with \"ccnx:/\").\n", value);
+				current = -1;
+				continue;
+			}
+			if (strlen (value) >= CefC_NAME_BUFSIZ) {
+				/* Never truncate the name: it would match another content */
+				cef_log_write (CefC_Log_Warn,
+					"log_tag.yaml: a name longer than %d bytes is ignored.\n", CefC_NAME_BUFSIZ - 1);
+				current = -1;
+				continue;
+			}
+			strcpy (hdl->log_tag_contents[hdl->log_tag_content_num].name, value);
 			hdl->log_tag_contents[hdl->log_tag_content_num].enabled = 0;
 			hdl->log_tag_contents[hdl->log_tag_content_num].wildcard = 0;
 			hdl->log_tag_contents[hdl->log_tag_content_num].name_len =
@@ -6080,6 +6161,55 @@ cefnetd_log_tag_lookup (
 	CefT_Netd_Handle* hdl,
 	CefT_CcnMsg_MsgBdy* pm
 ) {
+	uint16_t i;
+	int best_result;
+
+	if (hdl->log_tag_content_num == 0 || pm->name_len > CefC_NAME_MAXLEN) {
+		return (CefC_LogTag_NoMatch);
+	}
+
+	/*
+	 * The result depends only on the Name up to the first chunk segment (the same part
+	 * the URI conversion uses), so it is cached per that key.  log_tag_contents is never
+	 * modified after start-up, so the cache needs no invalidation.
+	 */
+	{
+		uint16_t key_len = 0;
+		uint32_t hv = 2166136261u;				/* FNV-1a */
+		CefT_LogTag_Cache_Entry* ce;
+
+		while ((uint32_t) key_len + CefC_S_TLF <= pm->name_len) {
+			struct tlv_hdr* th = (struct tlv_hdr*) &pm->name[key_len];
+			uint32_t seg = (uint32_t) CefC_S_TLF + ntohs (th->length);
+			if (ntohs (th->type) == CefC_T_CHUNK ||
+				(uint32_t) key_len + seg > pm->name_len) {
+				break;
+			}
+			key_len += (uint16_t) seg;
+		}
+		for (i = 0; i < key_len; i++) {
+			hv = (hv ^ pm->name[i]) * 16777619u;
+		}
+		ce = &hdl->log_tag_cache[hv & (CefC_LogTag_Cache_Size - 1)];
+		if (key_len > 0 && ce->key_len == key_len && memcmp (ce->key, pm->name, key_len) == 0) {
+			return (ce->result);
+		}
+		best_result = cefnetd_log_tag_lookup_scan (hdl, pm);
+		if (key_len > 0) {
+			ce->key_len = key_len;
+			ce->result = best_result;
+			memcpy (ce->key, pm->name, key_len);
+		}
+		return (best_result);
+	}
+}
+
+/* Linear scan of log_tag_contents (slow path of cefnetd_log_tag_lookup) */
+static int
+cefnetd_log_tag_lookup_scan (
+	CefT_Netd_Handle* hdl,
+	CefT_CcnMsg_MsgBdy* pm
+) {
 	/*
 	 * The conversion helper does no bounds checking. In the worst case every name byte is expanded to 2 hex characters, so the output is at most 2 * name_len plus the "ccnx:/" prefix and a few separators. The extra margin covers those.
 	 */
@@ -6087,10 +6217,6 @@ cefnetd_log_tag_lookup (
 	uint16_t i;
 	int best_score = 0;						/* 0: none, wildcard: 1 + prefix length, exact: max */
 	int best_result = CefC_LogTag_NoMatch;
-
-	if (hdl->log_tag_content_num == 0 || pm->name_len > CefC_NAME_MAXLEN) {
-		return (CefC_LogTag_NoMatch);
-	}
 
 	cef_frame_conversion_name_to_uri_without_chunknum (pm->name, pm->name_len, uri);
 	for (i = 0; i < hdl->log_tag_content_num; i++) {
@@ -6120,6 +6246,49 @@ cefnetd_log_tag_lookup (
 		}
 	}
 	return (best_result);
+}
+
+/*--------------------------------------------------------------------------------------
+	Records the Data returned to the Faces which are directly below this router
+	(the Consumer side) in the access log buffer.
+	Such a Face gets the Data with the Log Tag of this router.  A Face which gets
+	the Log Tag of another router is not recorded, since another router records it.
+	The Name is recorded without the chunk number, and chunk 0 counts as a new access.
+----------------------------------------------------------------------------------------*/
+static void
+cefnetd_access_log_record (
+	CefT_Netd_Handle* hdl,					/* cefnetd handle							*/
+	const uint16_t faceids[],				/* Face-IDs to which the Data is forwarded	*/
+	const unsigned char* const tags[],		/* Log Tag sent to each Face-ID				*/
+	const uint16_t tag_lens[],				/* Length of the Log Tag for each Face-ID	*/
+	const uint8_t tagged_ok[],				/* 1: the Data sent to the Face carries the tag	*/
+	uint16_t face_num,						/* Number of Face-IDs						*/
+	CefT_CcnMsg_MsgBdy* pm					/* Parsed message							*/
+) {
+	uint16_t own_len;
+	uint16_t name_len;
+	int new_access;
+	uint16_t i;
+
+	own_len = (uint16_t) strlen (hdl->log_tag_name);
+	if (hdl->access_log == NULL || own_len == 0) {
+		return;
+	}
+
+	if (pm->chunk_num_f) {
+		name_len = pm->name_len - (CefC_S_Type + CefC_S_Length + CefC_S_ChunkNum);
+		new_access = (pm->chunk_num == 0);
+	} else {
+		name_len = pm->name_len;
+		new_access = 1;
+	}
+
+	for (i = 0; i < face_num; i++) {
+		if (tagged_ok[i] && tag_lens[i] == own_len && memcmp (tags[i], hdl->log_tag_name, own_len) == 0) {
+			cef_access_log_record (hdl->access_log, faceids[i],
+				pm->name, name_len, new_access, hdl->nowtus);
+		}
+	}
 }
 
 /*--------------------------------------------------------------------------------------
@@ -6207,6 +6376,33 @@ cefnetd_config_read (
 				return (-1);
 			}
 			strcpy (hdl->log_tag_name, value);
+		} else if (strcmp (pname, CefC_ParamName_AccessLogBufSize) == 0) {
+			res = atoi (ws);
+			if (res < 1 || res > CefC_AccessLog_Max_BufSize) {
+				cef_log_write (CefC_Log_Error,
+					"%s must be between 1 and %d.\n",
+					CefC_ParamName_AccessLogBufSize, CefC_AccessLog_Max_BufSize);
+				return (-1);
+			}
+			hdl->access_log_buf_size = (uint32_t) res;
+		} else if (strcmp (pname, CefC_ParamName_AccessLogNameMax) == 0) {
+			res = atoi (ws);
+			if (res < 1 || res > CefC_NAME_MAXLEN) {
+				cef_log_write (CefC_Log_Error,
+					"%s must be between 1 and %d.\n",
+					CefC_ParamName_AccessLogNameMax, CefC_NAME_MAXLEN);
+				return (-1);
+			}
+			hdl->access_log_name_max = (uint32_t) res;
+		} else if (strcmp (pname, CefC_ParamName_AccessLogSwapThresh) == 0) {
+			res = atoi (ws);
+			if (res < 1 || res > 100) {
+				cef_log_write (CefC_Log_Error,
+					"%s must be between 1 and 100.\n",
+					CefC_ParamName_AccessLogSwapThresh);
+				return (-1);
+			}
+			hdl->access_log_swap_pct = (uint32_t) res;
 		} else if (strcmp (pname, CefC_ParamName_FibSize) == 0) {
 			res = atoi (ws);
 			if (res < 1) {

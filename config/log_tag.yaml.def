@@ -1,6 +1,8 @@
 # LCL (Log Collection List): access-log collection settings by Contents Name.
 # Each entry has the following keys:
 #   name    : Content name to which the entry applies.
+#             It must start with "ccnx:/" (for example "ccnx:/example/content").
+#             An entry without this prefix, or longer than 2047 bytes, is ignored with a warning.
 #             A name matches exactly (case-sensitive, chunk number ignored).
 #             A name ending with "/*" matches every name under that prefix, at any depth.
 #   collect : Set to true to attach a LOG_TAG to the Data packet when this node

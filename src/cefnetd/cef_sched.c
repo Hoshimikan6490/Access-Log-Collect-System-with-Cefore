@@ -188,6 +188,7 @@ cefnetd_nict_log_tag_find (
  * and must not overlap msg.
  * Returns 1 if the tag was added (the packet is in new_msg and header_len/payload_len
  * are updated), otherwise 0 (new_msg is not valid and the caller keeps using msg).
+ * It also returns 0 if pkt_len differs from header_len + payload_len, or the packet is too large.
  */
 int
 cefnetd_packet_add_log_tag (
@@ -229,6 +230,16 @@ cefnetd_packet_add_log_tag (
 		return (0);
 	}
 
+	/* The copy length must be consistent with the lengths the caller passed (same as remove) */
+	if ((uint32_t) *header_len + *payload_len > CefC_Max_Msg_Size
+		|| ntohs (in_hdr->pkt_len) != (uint32_t) *header_len + *payload_len) {
+		cef_log_write (CefC_Log_Warn,
+			"Log Tag was not added: inconsistent packet length (pkt_len=%u, header_len=%u, payload_len=%u)\n",
+			(unsigned int) ntohs (in_hdr->pkt_len),
+			(unsigned int) *header_len, (unsigned int) *payload_len);
+		return (0);
+	}
+
   // check if the message has its own T-ORG TLV and a LOG_TAG TLV in it
 	found = cefnetd_nict_log_tag_find (msg, *header_len,
 				&torg_pos, &old_torg_len, &log_tag_pos, &old_log_tag_len);
@@ -264,6 +275,10 @@ cefnetd_packet_add_log_tag (
 
   // add LOG_TAG TLV (without value of Log Tag) to the copied message
 	shift_from = insert_pos + skip_len;
+	if (shift_from > *header_len) {
+		/* The TLV positions point outside the header: never copy from there */
+		return (0);
+	}
 	memcpy (new_msg, msg, insert_pos);
 	memcpy (&new_msg[insert_pos + insert_len], &msg[shift_from], packet_len - shift_from);
 	if (has_own_torg) {
@@ -602,6 +617,8 @@ cefnetd_object_forward_with_log_tag (
 	uint16_t faceid_num, 					/* Number of Face-IDs to forward			*/
 	const unsigned char* const tags[],		/* Log Tag for each Face-ID					*/
 	const uint16_t tag_lens[],				/* Length of Log Tag for each Face-ID		*/
+	uint8_t tagged_ok[],					/* Out (may be NULL): 1 if the Object sent to
+											   faceids[i] carries tags[i]				*/
 	unsigned char* msg, 					/* received message to handle				*/
 	uint16_t payload_len, 					/* Payload Length of this message			*/
 	uint16_t header_len,					/* Header Length of this message			*/
@@ -609,6 +626,7 @@ cefnetd_object_forward_with_log_tag (
 	CefT_CcnMsg_OptHdr* poh 				/* Parsed Option Header						*/
 ) {
 	uint16_t group[CefC_Fib_UpFace_Max];
+	uint16_t group_idx[CefC_Fib_UpFace_Max];
 	uint8_t done[CefC_Fib_UpFace_Max];
 	/*
 	 * msg points into the receive buffer which also holds the following
@@ -619,6 +637,10 @@ cefnetd_object_forward_with_log_tag (
 
 	if (faceid_num > CefC_Fib_UpFace_Max) {
 		faceid_num = CefC_Fib_UpFace_Max;
+	}
+	if (tagged_ok != NULL) {
+		/* Faces which are not handled below are reported as not tagged */
+		memset (tagged_ok, 0, faceid_num);
 	}
 	memset (done, 0, sizeof (done));
 
@@ -638,6 +660,7 @@ cefnetd_object_forward_with_log_tag (
 		for (j = i; j < faceid_num; j++) {
 			if (!done[j] && tag_lens[j] == tag_lens[i] &&
 				(tag_lens[i] == 0 || memcmp (tags[j], tags[i], tag_lens[i]) == 0)) {
+				group_idx[group_num] = j;
 				group[group_num++] = faceids[j];
 				done[j] = 1;
 			}
@@ -653,6 +676,11 @@ cefnetd_object_forward_with_log_tag (
 			/* pm/poh of the caller keep describing the original msg */
 			cefnetd_object_forward (hdl, group, group_num, tagged_msg,
 				tagged_payload_len, tagged_header_len, &tagged_pm, &tagged_poh);
+			if (tagged_ok != NULL) {
+				for (j = 0; j < group_num; j++) {
+					tagged_ok[group_idx[j]] = 1;
+				}
+			}
 		} else {
 			cefnetd_object_forward (hdl, group, group_num, msg,
 				payload_len, header_len, pm, poh);

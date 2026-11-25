@@ -9,7 +9,7 @@
 #NODE_NAME=""
 
 # Access log tag name. If empty, NODE_NAME is used (or the node IP address
-# when NODE_NAME is not configured).
+# when NODE_NAME is not configured). Must be unique among the routers on a path.
 #LOG_TAG_NAME=""
 
 # Operational Log Level
@@ -25,6 +25,27 @@
 #  1: Enable
 #
 #ENABLE_ACCESS_LOG=0
+
+#
+# Access log buffer (used only when ENABLE_ACCESS_LOG=1).
+# Two buffers (accumulation and transfer) of the same size are allocated.
+# Records of the same Face and the same Contents Name are aggregated into one entry.
+# When the accumulation buffer is full, the least recently accessed entry is overwritten.
+#
+# Number of entries per buffer.
+# Range: 1 <= n <= 1048576
+#ACCESS_LOG_BUFFER_SIZE=4096
+#
+# Max length (bytes) of a Contents Name to record.
+# A longer name is not recorded.
+# Range: 1 <= n <= 1024
+# ACCESS_LOG_BUFFER_SIZE * ACCESS_LOG_NAME_MAX must be at most 67108864 (64 MiB);
+# otherwise cefnetd fails to start.
+#ACCESS_LOG_NAME_MAX=256
+#
+# Usage (%) of the accumulation buffer which triggers the swap with the transfer buffer.
+# Range: 1 <= n <= 100
+#ACCESS_LOG_SWAP_THRESHOLD=80
 
 #
 # Port number used by cefnetd.

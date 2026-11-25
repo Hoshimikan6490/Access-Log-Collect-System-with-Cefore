@@ -56,7 +56,7 @@ In addition to the cefnetdstart utility, cefnetdstop can also boot with the "-F"
 
 The "cefstatus" utility checks the cefnetd status. If the cefnetd has been started with the "-d config_file_dir" and "-p port_num" options, use the same startup options as in cefnetd to check the status.
 
-`cefstatus [-v] [--version] [-d config_file_dir] [-p port_num]`
+`cefstatus [-v] [--version] [--accesslog] [-d config_file_dir] [-p port_num]`
 
 Below is the output of the "cefstatus" utility. "-v" and "--version" show the version number of cefnetd.
 
@@ -75,6 +75,11 @@ Below is the output of the "cefstatus" utility. "-v" and "--version" show the ve
   &emsp;PIT entries for applications*  
 *PIT : num of the entries  
   &emsp;PIT entries*
+
+"--accesslog" shows only the access log buffers (for debugging) instead of the above. The buffers are not changed. It requires `ENABLE_ACCESS_LOG=1` in cefnetd.conf. The accumulation buffer, and the buffer waiting for transfer if there is one, are listed from the oldest to the newest entry. Face is the local Face-ID of cefnetd.
+
+> *Access Log (accumulation buffer) : used/capacity entries, evicted=n, skipped_long_name=n*  
+*Face  Accesses  Chunks  First  Last  Name*
 
 
 ### 1.4. FIB Entry Management

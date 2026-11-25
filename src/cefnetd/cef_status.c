@@ -40,6 +40,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <time.h>
 
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -144,6 +145,19 @@ static int
 cef_status_add_output_to_rsp_buf(
 	char* buff
 );
+/*--------------------------------------------------------------------------------------
+	Output access log buffers
+----------------------------------------------------------------------------------------*/
+static int
+cef_status_access_log_output (
+	CefT_Netd_Handle* hdl
+);
+static int
+cef_status_access_log_peek_cb (
+	void* arg,
+	const CefT_AccessLog_Buf* buf,
+	int is_active
+);
 #if ((defined CefC_CefnetdCache) && (defined CefC_Develop))
 /*--------------------------------------------------------------------------------------
 	Output LocalCache status
@@ -182,6 +196,11 @@ cef_status_stats_output (
 		goto endfunc;
 	}
 #endif	// CefC_Develop
+
+	if (output_opt_f & CefC_Ctrl_StatusOpt_AccessLog) {
+		fret = cef_status_access_log_output (hdl);
+		goto endfunc;
+	}
 
 	switch (hdl->node_type) {
 		case CefC_Node_Type_Receiver: {
@@ -318,6 +337,86 @@ endfunc:;
 		return (0);
 	}
 }
+/*--------------------------------------------------------------------------------------
+	Output access log buffers
+----------------------------------------------------------------------------------------*/
+static int
+cef_status_access_log_output (
+	CefT_Netd_Handle* hdl
+) {
+	char work_str[CefC_Max_Length];
+	int fret = 0;
+
+	if (hdl->access_log == NULL) {
+		sprintf (work_str, "Access log is disabled (ENABLE_ACCESS_LOG=0)\n");
+		return (cef_status_add_output_to_rsp_buf (work_str));
+	}
+	cef_access_log_peek (hdl->access_log, cef_status_access_log_peek_cb, &fret);
+	return (fret);
+}
+
+/*--------------------------------------------------------------------------------------
+	Output one access log buffer (called with the access log mutex held)
+----------------------------------------------------------------------------------------*/
+static int
+cef_status_access_log_peek_cb (
+	void* arg,
+	const CefT_AccessLog_Buf* buf,
+	int is_active
+) {
+	int* fretp = (int*) arg;
+	char work_str[CefC_Max_Length];
+	char uri[CefC_NAME_BUFSIZ];
+	char first[40];
+	char last[40];
+	int32_t i;
+
+	snprintf (work_str, sizeof (work_str),
+		"Access Log (%s buffer) : %u/%u entries, evicted=%llu, skipped_long_name=%llu\n",
+		is_active ? "accumulation" : "transfer", buf->used, buf->capacity,
+		(unsigned long long) buf->evicted, (unsigned long long) buf->skipped_long_name);
+	if ((*fretp = cef_status_add_output_to_rsp_buf (work_str)) != 0) {
+		return (1);
+	}
+	if (buf->used == 0) {
+		return (0);
+	}
+	sprintf (work_str, "  Face  Accesses  Chunks  First                       Last                        Name\n");
+	if ((*fretp = cef_status_add_output_to_rsp_buf (work_str)) != 0) {
+		return (1);
+	}
+
+	/* From the oldest to the newest */
+	for (i = buf->lru_head; i != CefC_AccessLog_Idx_None; i = buf->entries[i].lru_next) {
+		const CefT_AccessLog_Entry* ent = &buf->entries[i];
+		time_t t;
+		struct tm tm_work;
+
+		memset (uri, 0, sizeof (uri));
+		if (cef_frame_conversion_name_to_uri (
+				(unsigned char*) &buf->names[(size_t) i * buf->name_max], ent->name_len, uri) < 0) {
+			continue;
+		}
+		t = (time_t) (ent->first_ts / 1000000llu);
+		localtime_r (&t, &tm_work);
+		strftime (first, sizeof (first), "%Y-%m-%d %H:%M:%S", &tm_work);
+		sprintf (first + strlen (first), ".%06u", (unsigned int) (ent->first_ts % 1000000llu));
+		t = (time_t) (ent->last_ts / 1000000llu);
+		localtime_r (&t, &tm_work);
+		strftime (last, sizeof (last), "%Y-%m-%d %H:%M:%S", &tm_work);
+		sprintf (last + strlen (last), ".%06u", (unsigned int) (ent->last_ts % 1000000llu));
+
+		snprintf (work_str, sizeof (work_str),
+			"  %-5u %-9llu %-7llu %-27s %-27s %s\n",
+			ent->faceid, (unsigned long long) ent->access_count,
+			(unsigned long long) ent->chunk_count, first, last, uri);
+		if ((*fretp = cef_status_add_output_to_rsp_buf (work_str)) != 0) {
+			return (1);
+		}
+	}
+	return (0);
+}
+
 /*--------------------------------------------------------------------------------------
 	Output Face status
 ----------------------------------------------------------------------------------------*/
