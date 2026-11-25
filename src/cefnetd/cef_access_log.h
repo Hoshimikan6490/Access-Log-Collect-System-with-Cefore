@@ -142,6 +142,24 @@ cef_access_log_release (
 	CefT_AccessLog_Buf* buf
 );
 
+/*--------------------------------------------------------------------------------------
+	Passes the accumulation buffer, and then the buffer waiting for transfer if there is
+	one, to the callback while the mutex is held.  The buffers are not changed.
+	The callback returns 0 to continue, or non-zero to stop.
+----------------------------------------------------------------------------------------*/
+typedef int (*cef_access_log_peek_cb)(
+	void* arg,
+	const CefT_AccessLog_Buf* buf,
+	int is_active							/* 1: accumulation buffer, 0: transfer buffer	*/
+);
+
+void
+cef_access_log_peek (
+	CefT_AccessLog* al,
+	cef_access_log_peek_cb cb,
+	void* arg
+);
+
 /*
  * Iterates the entries of an acquired buffer from the oldest to the newest:
  *   for (i = buf->lru_head; i != CefC_AccessLog_Idx_None; i = buf->entries[i].lru_next)

@@ -164,6 +164,7 @@ int cefnetd_packet_remove_log_tag (
 #define CefC_Ctrl_StatusOpt_LCache	0x0004
 #endif //((defined CefC_CefnetdCache) && (defined CefC_Develop))
 #define CefC_Ctrl_StatusOpt_Numofpit	0x0008
+#define CefC_Ctrl_StatusOpt_AccessLog	0x0010
 
 /* cefstatus output option */
 #if ((defined CefC_Develop))

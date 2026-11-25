@@ -285,6 +285,28 @@ cef_access_log_release (
 }
 
 /*--------------------------------------------------------------------------------------
+	Passes the buffers to the callback without changing them (for cefstatus)
+----------------------------------------------------------------------------------------*/
+void
+cef_access_log_peek (
+	CefT_AccessLog* al,
+	cef_access_log_peek_cb cb,
+	void* arg
+) {
+	if (al == NULL || cb == NULL) {
+		return;
+	}
+
+	pthread_mutex_lock (&al->mutex);
+	if (cb (arg, &al->buf[al->active], 1) == 0 &&
+		al->other_state == CefC_AccessLog_State_Ready) {
+		/* A buffer which is InUse is owned by the transfer side, so it is not read here */
+		cb (arg, &al->buf[1 - al->active], 0);
+	}
+	pthread_mutex_unlock (&al->mutex);
+}
+
+/*--------------------------------------------------------------------------------------
 	Swaps the accumulation buffer and the other buffer (the mutex must be held)
 ----------------------------------------------------------------------------------------*/
 static int

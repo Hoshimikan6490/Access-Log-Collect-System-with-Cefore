@@ -159,6 +159,14 @@ int main (
 				printerr("[-s] has no parameter.\n");
 				exit (1);
 			}
+		} else if (strcmp (work_arg, "--accesslog") == 0) {
+			if (strcmp (argv[1], CefC_Arg_Status) == 0) {
+				output_opt_f |= CefC_Ctrl_StatusOpt_AccessLog;
+			} else {
+				printerr("[--accesslog] has no parameter.
+");
+				exit (1);
+			}
 		} else if (strcmp (work_arg, "-m") == 0) {			//Secret option
 			if (strcmp (argv[1], CefC_Arg_Status) == 0) {
 				output_opt_f |= CefC_Ctrl_StatusOpt_Metric;
