@@ -348,8 +348,7 @@ cef_status_access_log_output (
 	int fret = 0;
 
 	if (hdl->access_log == NULL) {
-		sprintf (work_str, "Access log is disabled (ENABLE_ACCESS_LOG=0)
-");
+		sprintf (work_str, "Access log is disabled (ENABLE_ACCESS_LOG=0)\n");
 		return (cef_status_add_output_to_rsp_buf (work_str));
 	}
 	cef_access_log_peek (hdl->access_log, cef_status_access_log_peek_cb, &fret);
@@ -372,8 +371,8 @@ cef_status_access_log_peek_cb (
 	char last[40];
 	int32_t i;
 
-	sprintf (work_str, "Access Log (%s buffer) : %u/%u entries, evicted=%llu, skipped_long_name=%llu
-",
+	snprintf (work_str, sizeof (work_str),
+		"Access Log (%s buffer) : %u/%u entries, evicted=%llu, skipped_long_name=%llu\n",
 		is_active ? "accumulation" : "transfer", buf->used, buf->capacity,
 		(unsigned long long) buf->evicted, (unsigned long long) buf->skipped_long_name);
 	if ((*fretp = cef_status_add_output_to_rsp_buf (work_str)) != 0) {
@@ -382,8 +381,7 @@ cef_status_access_log_peek_cb (
 	if (buf->used == 0) {
 		return (0);
 	}
-	sprintf (work_str, "  Face  Accesses  Chunks  First                       Last                        Name
-");
+	sprintf (work_str, "  Face  Accesses  Chunks  First                       Last                        Name\n");
 	if ((*fretp = cef_status_add_output_to_rsp_buf (work_str)) != 0) {
 		return (1);
 	}
@@ -408,8 +406,8 @@ cef_status_access_log_peek_cb (
 		strftime (last, sizeof (last), "%Y-%m-%d %H:%M:%S", &tm_work);
 		sprintf (last + strlen (last), ".%06u", (unsigned int) (ent->last_ts % 1000000llu));
 
-		sprintf (work_str, "  %-5u %-9llu %-7llu %-27s %-27s %s
-",
+		snprintf (work_str, sizeof (work_str),
+			"  %-5u %-9llu %-7llu %-27s %-27s %s\n",
 			ent->faceid, (unsigned long long) ent->access_count,
 			(unsigned long long) ent->chunk_count, first, last, uri);
 		if ((*fretp = cef_status_add_output_to_rsp_buf (work_str)) != 0) {
