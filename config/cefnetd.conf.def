@@ -9,7 +9,7 @@
 #NODE_NAME=""
 
 # Access log tag name. If empty, NODE_NAME is used (or the node IP address
-# when NODE_NAME is not configured).
+# when NODE_NAME is not configured). Must be unique among the routers on a path.
 #LOG_TAG_NAME=""
 
 # Operational Log Level
