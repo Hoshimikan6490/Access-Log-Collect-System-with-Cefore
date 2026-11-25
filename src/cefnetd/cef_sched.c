@@ -635,12 +635,12 @@ cefnetd_object_forward_with_log_tag (
 	unsigned char* tagged_msg = hdl->log_tag_buf;
 	uint16_t i, j, group_num;
 
+	if (faceid_num > CefC_Fib_UpFace_Max) {
+		faceid_num = CefC_Fib_UpFace_Max;
+	}
 	if (tagged_ok != NULL) {
 		/* Faces which are not handled below are reported as not tagged */
 		memset (tagged_ok, 0, faceid_num);
-	}
-	if (faceid_num > CefC_Fib_UpFace_Max) {
-		faceid_num = CefC_Fib_UpFace_Max;
 	}
 	memset (done, 0, sizeof (done));
 
