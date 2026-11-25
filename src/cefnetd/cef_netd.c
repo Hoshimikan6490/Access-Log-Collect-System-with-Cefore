@@ -4508,6 +4508,9 @@ cefnetd_incoming_object_process_core (
 
 			for (face = &(pe[pe_seq]->dnfaces); face->next;) {
 				face = face->next;
+				if ( face_num >= CefC_Fib_UpFace_Max ) {
+					break;
+				}
 				if ( !cefnetd_faceidmap_is_set(faceid_bitmap, face->faceid) ){
 					cefnetd_faceidmap_set(faceid_bitmap, face->faceid);
 					face_tags[face_num] = face->log_tag;
